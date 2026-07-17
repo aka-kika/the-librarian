@@ -1,0 +1,15 @@
+# env / runtime
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# compiled reranker — build from afm_rerank.swift
+bin/afm-rerank
+
+# local agent config + personal/internal notes (not part of the public project)
+.claude/
+CLAUDE.md
+PROJECT.md
+audit/
+TRIM-CANDIDATES.md

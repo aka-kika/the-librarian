@@ -1,5 +1,29 @@
 # the_librarian
 
+![the_librarian — an owl librarian sliding three glowing books across a desk to a small robot patron, in an infinite night library](assets/banner.webp)
+
+## How it started
+
+One question in a chat:
+
+> *"I'm sure you know better than the internet what you need to get better. What's the best workflow with Claude Code? Installing skills and just you pick the best? More the better? Less is more?"*
+
+The answer: **less is more.** Every installed skill costs tokens and adds triggering ambiguity — with 50 skills, descriptions overlap and the wrong one fires; with 8 sharp ones, triggering is nearly deterministic.
+
+But the collection had ~3,000. So instead of installing any of them: give the collection a librarian.
+
+- `find_skill(intent)` → librarian recommends
+- agent uses the skill, does the work
+- `report_outcome(skill, worked: true/false, note)` → librarian logs it
+
+> *"The poetic part: the librarian is itself the curation loop. Log every query and what got picked vs ignored — skills that never surface are your kill candidates, queries that match nothing are your gaps. The collection optimizes itself from its own usage data."*
+
+> *"So the full shape: SQLite (skills, embeddings, query log, outcome log) + FastMCP + two read tools + one write tool. Maybe 300 lines of Python. It's small, it's one thing, and it compounds."*
+
+It's ~600 lines now. Scope creep found even the librarian. Screenshots of the original chat are in [`assets/origin/`](assets/origin/).
+
+## What it is
+
 A local-first MCP server that acts as a **librarian** between coding agents and a large skill collection (~3,000 skills). The collection stays raw markdown on disk — agents never load it into context. They ask; the librarian retrieves (embedding search + MMR diversity + recency decay), optionally deliberates with Apple's on-device Foundation Model, and learns from reported outcomes.
 
 Core principle: **agents read recommendations, write only outcomes.** They never edit skills, weights, or rankings. Curation decisions stay with the human, informed by `librarian_stats`.

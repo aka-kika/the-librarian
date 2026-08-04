@@ -30,7 +30,7 @@ Core principle: **agents read recommendations, write only outcomes.** They never
 
 Every stage is local and free: Ollama embeddings, SQLite, and (optionally) Apple Intelligence.
 
-**→ [Five weeks in production: real usage numbers](USAGE-REPORT.md)** — 87 queries, 44 agent-filed outcome reports, what worked and what's queued next.
+**→ [In production since June: real usage numbers](USAGE-REPORT.md)** — 130 queries, 76 agent-filed outcome reports across two snapshots (latest 2026-08-04), what worked and what's queued next.
 
 ## Pipeline (one find request, end to end)
 
@@ -48,7 +48,7 @@ intent ─→ Ollama embed (nomic-embed-text, /api/embed)
 ```bash
 cd the_librarian
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python "mcp[cli]" httpx pydantic
+uv pip install --python .venv/bin/python "mcp[cli]>=2" httpx pydantic
 
 # embedding model on whichever node you point at:
 ollama pull nomic-embed-text

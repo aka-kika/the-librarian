@@ -1,6 +1,34 @@
-# Five weeks in production — usage report
+# The librarian in production — usage report
 
-Snapshot taken **2026-07-17**, covering 2026-06-10 (deploy day) → 2026-07-17. All numbers straight from `~/.skill_librarian/librarian.db` — the append-only logs the librarian keeps for itself.
+Two snapshots, newest first. All numbers straight from `~/.skill_librarian/librarian.db` — the append-only logs the librarian keeps for itself.
+
+## Update — eight weeks in (snapshot 2026-08-04)
+
+| Metric | 2026-08-04 | 2026-07-17 |
+|---|---|---|
+| Skills indexed | 3,125 | 3,030 |
+| Queries served | 130 (129 `find`, 1 `brainstorm`) | 87 |
+| Active days | 26 of 56 | 18 of 38 |
+| Outcome reports filed by agents | 76 (on 65 distinct skills) | 44 |
+| Report rate | ~59% of find queries | ~51% |
+| Reported **worked** | 37 | 21 |
+| Reported **didn't work / not used** | 39 | 23 |
+| Skills surfaced at least once | 302 (9.7%) | 226 (7.5%) |
+| Skills never surfaced | 2,823 (90.3%) | 2,804 (92.5%) |
+
+What three more weeks added:
+
+- **The feedback loop held its shape.** Report rate went *up* (51% → 59%) as query volume grew — agents keep filing outcomes unprompted, and the notes stayed diagnostic ("wrong domain — needed pool→cover assign, not command palette"; "all three recommendations were SwiftData, product brief mandates GRDB").
+- **Negatives are still ranking precision, not skill quality.** Reading the 16 newest `worked: false` notes: the clear majority remain "not relevant / solved it another way" rather than "used it and it fell short" — the same split the five-week report called out.
+- **Hot skills drifted with the actual work.** Now led by `macos-menubar-swiftui` (9), `apple-hig-swiftui-macos` (8), `mcp-server-patterns` (7), `macos-spm-app-packaging` (7), `macos-menubar-tuist-app` (7) — the summer's menubar-app streak is visible in the librarian's own log.
+- **The rewrite list is still empty.** `low_success_rate` (needs ≥3 uses) has no entries at 130 queries; the cull stays usage-driven and patient.
+- **Platform note:** the server itself migrated to the mcp Python SDK 2.0 on 2026-08-04 (`FastMCP` → `MCPServer`, call counter as first-class middleware). Tool schemas unchanged — clients see nothing different. Details in [CHANGELOG.md](CHANGELOG.md).
+
+The original five-week report follows unchanged.
+
+## Five weeks in production (snapshot 2026-07-17)
+
+Snapshot taken **2026-07-17**, covering 2026-06-10 (deploy day) → 2026-07-17.
 
 ## The headline numbers
 

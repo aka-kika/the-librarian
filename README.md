@@ -112,6 +112,19 @@ Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embeddi
 | `librarian_reindex` | Rescan + re-embed changed SKILL.md files (hash-checked, cheap to rerun). |
 | `librarian_stats` | Curation digest: hot skills, never-surfaced (kill candidates), low success rate (rewrite candidates). |
 
+## Teaching your agents to use it
+
+Connecting the server is half the job — agents also need the habit of asking. The repo
+ships one agent skill for that: [`skills/using-the-skill-librarian`](skills/using-the-skill-librarian/SKILL.md).
+Install it in each agent's skills directory and it teaches the whole loop: find before
+any non-trivial task, weigh the why/why-nots, read the winning skill in place, and
+always file a `librarian_report` afterward — the reports are what make the collection
+curate itself.
+
+The joke writes itself, but it's real: **the only skill you install is the one that
+teaches agents to ask the librarian.** In eight weeks of production use, that habit
+produced outcome reports on ~59% of queries, unprompted.
+
 ## Why it won't recommend the same 3 skills forever
 
 The failure mode this design exists to kill: a naive retriever recommends the same handful of skills every time. Three mechanisms prevent it:

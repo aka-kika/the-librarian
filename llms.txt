@@ -25,6 +25,8 @@ Key facts:
 ## Docs
 
 - [README](README.md): what it is, pipeline, setup, tools, tuning knobs
+- [skills/using-the-skill-librarian/SKILL.md](skills/using-the-skill-librarian/SKILL.md):
+  the one agent skill to install — teaches agents the ask → use → report loop
 - [ORIGIN.md](ORIGIN.md): the original conversation the project came from
 - [USAGE-REPORT.md](USAGE-REPORT.md): real production numbers, two snapshots
 - [CHANGELOG.md](CHANGELOG.md): changes and the decisions behind them

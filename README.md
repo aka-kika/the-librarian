@@ -20,7 +20,7 @@ But the collection had ~3,000. So instead of installing any of them: give the co
 
 > *"So the full shape: SQLite (skills, embeddings, query log, outcome log) + FastMCP + two read tools + one write tool. Maybe 300 lines of Python. It's small, it's one thing, and it compounds."*
 
-It's ~600 lines now. Scope creep found even the librarian. Screenshots of the original chat are in [`assets/origin/`](assets/origin/).
+It's ~600 lines now. Scope creep found even the librarian. The original conversation — typed poolside on a phone, typos preserved on purpose — is in [ORIGIN.md](ORIGIN.md).
 
 ## What it is
 

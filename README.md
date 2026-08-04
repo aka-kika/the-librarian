@@ -1,6 +1,10 @@
 # the_librarian
 
-![the_librarian — an owl librarian sliding three glowing books across a desk to a small robot patron, in an infinite night library](assets/banner.webp)
+**A skill librarian MCP server — your agents stop carrying the whole skill collection in context and start asking for the one right book.**
+
+![the_librarian — a wall of thousands of muted books; through the one gap, a robot hand pulls out the single orange book](assets/banner.webp)
+
+![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) ![Python 3.12+](https://img.shields.io/badge/python-3.12+-lightgrey) ![MCP server](https://img.shields.io/badge/MCP-server-lightgrey) ![Local-first](https://img.shields.io/badge/local--first-no%20cloud-lightgrey)
 
 ## How it started
 
@@ -24,7 +28,7 @@ It's ~600 lines now. Scope creep found even the librarian. The original conversa
 
 ## What it is
 
-A local-first MCP server that acts as a **librarian** between coding agents and a large skill collection (~3,000 skills). The collection stays raw markdown on disk — agents never load it into context. They describe what they're trying to do in plain language; the librarian finds the skills whose *meaning* matches (semantic search — no keyword guessing), makes sure the shortlist isn't three flavors of the same thing, avoids repeating what it just recommended, optionally lets Apple's on-device model deliberate over the finalists — and learns from what agents report back.
+A local-first MCP server that acts as a **librarian** between coding agents and a large skill collection. The collection stays raw markdown on disk — agents never load it into context. They describe what they're trying to do in plain language; the librarian finds the skills whose *meaning* matches (semantic search — no keyword guessing), makes sure the shortlist isn't three flavors of the same thing, avoids repeating what it just recommended, optionally lets Apple's on-device model deliberate over the finalists — and learns from what agents report back.
 
 Core principle: **agents read recommendations, write only outcomes.** They never edit skills, weights, or rankings. Curation decisions stay with the human, informed by `librarian_stats`.
 
@@ -138,5 +142,19 @@ Env knobs: `LIBRARIAN_CANONICAL_PREFIXES` (which top-level dirs win duplicate-na
 - Never load full skill bodies into tool responses — descriptions + metadata only. The whole point is keeping the collection out of agent context.
 - Agents get no write access beyond the append-only outcome log.
 - DB is SQLite WAL at `~/.skill_librarian/librarian.db`; `query_log` and `outcome_log` are append-only — no tool deletes or rewrites log rows.
+
+## FAQ
+
+**What is a skill librarian?**
+An MCP server that sits between AI agents and a skill collection: agents describe a task in plain language, the librarian recommends the few skills that fit, and the collection itself never enters agent context.
+
+**Why not just install all the skills?**
+Every installed skill's description is loaded into context on every request — with a large collection that's a constant token cost, and overlapping descriptions make the wrong skill fire. The librarian reduces that to one tool call when a skill is actually needed.
+
+**Does it work with agents other than Claude Code?**
+Yes — it's a standard stdio MCP server. Any MCP client (Claude Code, Claude Desktop, Cursor, Goose, and others) can use it; this one runs against five different agents daily.
+
+**Does my skill collection leave my machine?**
+No. Indexing (Ollama), storage (SQLite), and the optional reranker (Apple's on-device model) all run locally. Nothing is sent anywhere.
 
 See `CHANGELOG.md` for the full history of changes and the decisions behind them.

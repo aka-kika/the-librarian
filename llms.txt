@@ -1,0 +1,30 @@
+# the_librarian
+
+> A skill librarian MCP server. Agents never load a skill collection into
+> context: they describe a task in plain language, the librarian recommends the
+> few skills that fit (local semantic search with diversity and anti-repetition),
+> and agents report outcomes back so the collection curates itself from usage.
+> Fully local: Ollama embeddings, SQLite storage, optional Apple on-device
+> reranking. Python, single file, MIT.
+
+Key facts:
+- Problem solved: every installed skill costs context tokens on every request
+  and overlapping descriptions cause wrong triggering; the librarian replaces
+  always-loaded skills with one on-demand tool call.
+- Tools: librarian_find (ranked shortlist for an intent), librarian_brainstorm
+  (diverse sweep + wildcards), librarian_report (agent files worked/failed),
+  librarian_reindex (rescan changed SKILL.md files), librarian_stats (curation
+  digest: hot skills, never-surfaced, low success rate).
+- Agents have no write access beyond the append-only outcome log; curation
+  decisions stay with the human.
+- Works with any MCP client over stdio (Claude Code, Claude Desktop, Cursor,
+  Goose, and others). Requires Python 3.12+, the mcp SDK 2.x, and Ollama with
+  nomic-embed-text.
+- In production since 2026-06-10; usage numbers are published in the repo.
+
+## Docs
+
+- [README](README.md): what it is, pipeline, setup, tools, tuning knobs
+- [ORIGIN.md](ORIGIN.md): the original conversation the project came from
+- [USAGE-REPORT.md](USAGE-REPORT.md): real production numbers, two snapshots
+- [CHANGELOG.md](CHANGELOG.md): changes and the decisions behind them

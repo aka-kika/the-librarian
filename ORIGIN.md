@@ -1,14 +1,14 @@
 # The origin conversation
 
-*Mid-day, poolside, phone in hand. Claude Fable had just come out and word was it would only be around for a few days — so this had to be a question worth asking. It was the first one that came to mind. Not because it had been on the list — it hadn't — but because the whole feed at the time was skills, skills, skills: the skill you need, the skill you didn't know you need. And when there is too much of something, run.*
+*June 10, 2026 — the day the usage report counts as deploy day. Mid-day, poolside, phone in hand. Claude Fable had just come out and word was it would only be around for a few days — so this had to be a question worth asking. It was the first one that came to mind. Not because it had been on the list — it hadn't — but because the whole feed at the time was skills, skills, skills: the skill you need, the skill you didn't know you need. And when there is too much of something, run.*
 
-*What follows is the conversation exactly as it happened — typed on a phone, typos kept on purpose. The librarian in this repo is what came out the other side.*
+*What follows is the conversation exactly as it happened — typed on a phone, typos kept on purpose. The librarian in this repo is what came out the other side, the same day.*
 
 ---
 
 **Kika**
 
-I'm m sure you know better then then the internet what you need to get better. What's the best workflow with Claude code? Installing skills and just you pick the best? More the better? Less is more?
+I'm m sure you know better then then the internet what you need to get better . What's the best workflow with Claude code ? Installing skills and just you pick the best? More the better? Less is more?
 
 ---
 
@@ -31,7 +31,7 @@ So no — don't install everything and let Claude pick. Curate ruthlessly, write
 
 **Kika**
 
-Plugins vs skills. Go
+Plugins vs skills . Go
 
 ---
 
@@ -57,7 +57,8 @@ For you specifically: keep authoring as bare skills, your Dropbox + symlink setu
 
 **Kika**
 
-My dream is to make a "talk to skills" app. I did one. Was 90% ok. It was just recommending same skills always. To have a collection that is getting updated, adjusted, optimized, and then keep it out of reach of agents, but use ai to talk to the collection raw text and brainstorm what skill I can use now
+My dream is to make a "talk to skills" app. I did one. Was 90% ok. It was just recommending same skills always .
+To have a collection that is getting updated , adjusted, optimized, and then keep it out of reach of agents, but use ai to talk to the collection raw text and brainstorm what skill I can use now
 
 ---
 
@@ -78,19 +79,57 @@ Want me to sketch the FastMCP scaffold for it? It's structurally a sibling of yo
 
 ---
 
+**Kika**
+
+Mcp is genius. The agent can answer back with results . No?
+
+---
+
 **Claude**
 
-Yes — let's build it now so it's waiting for you. Let me check the MCP scaffolding reference first.
+Exactly — and that's the part that makes it a system instead of a search box. MCP tools aren't read-only. Add a third tool and the loop closes:
+
+- `find_skill(intent)` → librarian recommends
+- agent uses the skill, does the work
+- `report_outcome(skill, worked: true/false, note)` → librarian logs it
+
+Now every agent in your fleet — Hermes, Tinker, Deepflow, whoever — becomes a sensor feeding the collection. The librarian accumulates ground truth: this skill gets recommended often but fails half the time (rewrite its description), this one always works for design tasks (boost it), this one hasn't been picked in 60 days (kill candidate). Your Keep-Trial-Kill framework, but scored by actual usage instead of your manual ratings.
+
+One design caution: keep the write surface narrow. Agents report outcomes — they never edit skills, never adjust weights directly. The librarian decides how to interpret reports; you decide what changes. Otherwise one confused agent hammering `report_outcome` with garbage poisons your rankings. Append-only log, you review the digest, collection stays out of reach exactly as you wanted.
+
+So the full shape: SQLite (skills, embeddings, query log, outcome log) + FastMCP + two read tools + one write tool. Maybe 300 lines of Python. Honestly one of the cleaner ideas you've had — it's small, it's one thing, and it compounds.
 
 ---
 
 **Kika**
 
-can you make a claude md file, i wil span you to the claude code with this task
+Can we make it? I'm gonna be bear my Mac in an hour or less.
 
 ---
 
 **Claude**
+
+Yes — let's build it now so it's waiting for you. Let me check the MCP scaffolding reference first.
+
+*[Ran 7 commands, viewed 2 files, created 2 files]*
+
+Done and tested — full loop runs: reindex → find → brainstorm (with wildcards) → outcome report → stats. ~380 lines, single file, SQLite, stdio, structurally a sibling of your ollama\_mcp.
+
+When you're at the Mac: drop `server.py` in `KIKA_HUB/INFRA/skill_librarian/`, `pip install "mcp[cli]" httpx pydantic`, `ollama pull nomic-embed-text` on whichever node, add the config block from the README, then run `librarian_reindex` once. Point `LIBRARIAN_SKILLS_DIR` at your canonical Dropbox skills folder and every machine shares one librarian brain.
+
+The monotony fix from your v1 is baked in three ways: MMR diversity, a recency penalty on anything recommended in the last 10 queries, and brainstorm mode injecting 2 random wildcards. All tunable at the top of the file.
+
+---
+
+**Kika**
+
+can you make a claude md file , i wil span you to the claude code with this task
+
+---
+
+**Claude**
+
+*[Created a file, read a file]*
 
 Here it is. Drop all three files (`server.py`, `README.md`, `CLAUDE.md`) into `~/KIKA_HUB/INFRA/skill_librarian/`, open Claude Code there, and just say "do task 1 from CLAUDE.md."
 
@@ -98,4 +137,4 @@ It's written so Claude Code can't drift: status says the server is done (no rewr
 
 ---
 
-*And that was it. The files landed, Claude Code deployed them, and the librarian has been answering `find_skill(intent)` ever since — [the numbers it kept about itself are here](USAGE-REPORT.md).*
+*And that was it. An hour later the files landed, Claude Code deployed them, and the librarian has been answering `find_skill(intent)` ever since — [the numbers it kept about itself are here](USAGE-REPORT.md).*

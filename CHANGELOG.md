@@ -2,6 +2,25 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-08-04 (mcp SDK 2.0 migration)
+
+### Changed — migrated off the removed FastMCP API
+The `mcp` Python SDK 2.0 deleted `mcp.server.fastmcp.FastMCP`; the server now
+uses `mcp.server.mcpserver.MCPServer` and the venv is upgraded 1.27.2 → 2.0.0
+(`uv pip install --python .venv/bin/python "mcp>=2.0.0"`). The call counter no
+longer monkeypatches the private `_mcp_server.request_handlers[CallToolRequest]`
+(gone in 2.0) — it is now first-class server middleware
+(`MCPServer(..., middleware=[_count_tool_calls])`) that logs `tools/call` from
+`ctx.method`/`ctx.params`, with client info read from `ctx.session.client_params`
+(handles both `client_info` and `clientInfo` spellings). Tool decorators,
+pydantic param models, annotations, and `mcp.run(transport="stdio")` were
+source-compatible — no changes needed. Verified 2026-08-04 with a live stdio
+probe: all 5 tools listed, `FindInput` schema shape unchanged, annotations
+intact, `librarian_stats` answered from the live DB (3,125 skills), counter
+wrote one JSONL line with client name+version. Pre-migration code:
+`server.py.bak-20260804-mcp2`. Other agents (Cursor, Grok, Goose, MiniMax)
+launch the same venv — running instances keep the old code until restarted.
+
 ## 2026-07-05 (collection reorg, stats payload fix, health check)
 
 ### Changed — collection reorganized to 4 clean roots + inbox

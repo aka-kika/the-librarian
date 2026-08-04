@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------- config
@@ -53,9 +53,6 @@ RECENCY_PENALTY = 0.15       # score subtracted per recent appearance
 MMR_LAMBDA_FIND = 0.7        # relevance-vs-diversity for find (higher = more relevant)
 MMR_LAMBDA_BRAINSTORM = 0.45 # brainstorm leans diverse
 
-mcp = FastMCP("skill_librarian_mcp")
-
-
 # --- call counter: one JSONL line per tool call (ts, tool, client) ---------
 import json as _json, os as _os
 from datetime import datetime as _dt, timezone as _tz
@@ -67,37 +64,29 @@ _CALL_LOG = _Path(
     / "skill-librarian-mcp" / "calls.jsonl"
 )
 
-def _count_tool_calls(_m):
-    """Wrap the CallToolRequest handler; counting must never break the server."""
-    try:
-        import mcp.types as _t
-        _low = _m._mcp_server
-        _orig = _low.request_handlers[_t.CallToolRequest]
-
-        async def _counted(req):
+async def _count_tool_calls(_ctx, _call_next):
+    """mcp 2.x server middleware; counting must never break the server."""
+    if _ctx.method == "tools/call":
+        try:
             try:
-                _info = _low.request_context.session.client_params.clientInfo
+                _cp = _ctx.session.client_params
+                _info = getattr(_cp, "client_info", None) or getattr(_cp, "clientInfo")
                 _client, _ver = _info.name, _info.version
             except Exception:
                 _client, _ver = "unknown", None
-            try:
-                _CALL_LOG.parent.mkdir(parents=True, exist_ok=True)
-                with _CALL_LOG.open("a", encoding="utf-8") as _f:
-                    _f.write(_json.dumps({
-                        "ts": _dt.now(_tz.utc).isoformat(timespec="seconds"),
-                        "tool": req.params.name,
-                        "client": _client,
-                        "client_version": _ver,
-                    }) + "\n")
-            except OSError:
-                pass
-            return await _orig(req)
+            _CALL_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with _CALL_LOG.open("a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({
+                    "ts": _dt.now(_tz.utc).isoformat(timespec="seconds"),
+                    "tool": (_ctx.params or {}).get("name", "?"),
+                    "client": _client,
+                    "client_version": _ver,
+                }) + "\n")
+        except Exception:
+            pass
+    return await _call_next(_ctx)
 
-        _low.request_handlers[_t.CallToolRequest] = _counted
-    except Exception:
-        pass
-
-_count_tool_calls(mcp)
+mcp = MCPServer("skill_librarian_mcp", middleware=[_count_tool_calls])
 # ---------------------------------------------------------------------------
 
 

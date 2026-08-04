@@ -24,7 +24,7 @@ It's ~600 lines now. Scope creep found even the librarian. The original conversa
 
 ## What it is
 
-A local-first MCP server that acts as a **librarian** between coding agents and a large skill collection (~3,000 skills). The collection stays raw markdown on disk — agents never load it into context. They ask; the librarian retrieves (embedding search + MMR diversity + recency decay), optionally deliberates with Apple's on-device Foundation Model, and learns from reported outcomes.
+A local-first MCP server that acts as a **librarian** between coding agents and a large skill collection (~3,000 skills). The collection stays raw markdown on disk — agents never load it into context. They describe what they're trying to do in plain language; the librarian finds the skills whose *meaning* matches (semantic search — no keyword guessing), makes sure the shortlist isn't three flavors of the same thing, avoids repeating what it just recommended, optionally lets Apple's on-device model deliberate over the finalists — and learns from what agents report back.
 
 Core principle: **agents read recommendations, write only outcomes.** They never edit skills, weights, or rankings. Curation decisions stay with the human, informed by `librarian_stats`.
 
@@ -34,12 +34,14 @@ Every stage is local and free: Ollama embeddings, SQLite, and (optionally) Apple
 
 ## Pipeline (one find request, end to end)
 
+In plain words: every skill's description is turned once into an *embedding* — a list of numbers that captures what the skill is about, so "package my server for distribution" can match a skill that never uses the word "package." A request goes through five steps:
+
 ```
 intent ─→ Ollama embed (nomic-embed-text, /api/embed)
-       ─→ cosine vs ~3,000 skill vectors (SQLite)
-       ─→ MMR diversity + recency decay              ← anti-monotony
+       ─→ cosine vs ~3,000 skill vectors (SQLite)      ← "which skills mean the same thing?"
+       ─→ MMR diversity + recency decay                ← anti-monotony (see below)
        ─→ [opt-in] AFM rerank: Apple's on-device model scores fit 1–10,
-          why / why-not per candidate, final pick     (bin/afm-rerank, ~6–12s)
+          why / why-not per candidate, final pick       (bin/afm-rerank, ~6–12s)
        ─→ compact JSON shortlist
 ```
 
@@ -100,7 +102,7 @@ Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embeddi
 
 | Tool | What it does |
 |---|---|
-| `librarian_find` | Ranked shortlist for an intent. Diversity-adjusted, recency-decayed, shows success rates. |
+| `librarian_find` | Ranked shortlist for an intent — varied picks, no repeats from recent queries, success rates shown. |
 | `librarian_brainstorm` | Wide diverse sweep + 2 random wildcards. For ideation, not convergence. |
 | `librarian_report` | Agent reports skill worked/failed. Append-only — agents can't touch rankings. |
 | `librarian_reindex` | Rescan + re-embed changed SKILL.md files (hash-checked, cheap to rerun). |
@@ -110,13 +112,13 @@ Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embeddi
 
 The failure mode this design exists to kill: a naive retriever recommends the same handful of skills every time. Three mechanisms prevent it:
 
-1. **MMR selection** — penalizes candidates too similar to ones already picked in the same response.
-2. **Recency decay** — anything recommended in the last 10 queries gets downweighted (`RECENCY_PENALTY = 0.15` per appearance — tune at top of server.py).
+1. **MMR selection** (maximal marginal relevance) — each next pick has to be relevant to the request *and* different from the picks already made, so the shortlist can't be three near-duplicates.
+2. **Recency decay** — the librarian remembers its own recent recommendations; anything suggested in the last 10 queries gets pushed down (`RECENCY_PENALTY = 0.15` per appearance — tune at top of server.py).
 3. **Wildcards in brainstorm mode** — 2 random skills from outside the relevant set, every time.
 
 The AFM reranker runs *after* these — it reorders the already-diversified shortlist, so it can't reintroduce monotony.
 
-Five weeks of real data says it works: 226 distinct skills surfaced across 87 queries. See the [usage report](USAGE-REPORT.md) for the one sharp edge (recency decay also hides just-confirmed winners) and the fix queued for it.
+Eight weeks of real data says it works: 302 distinct skills surfaced across 130 queries. See the [usage report](USAGE-REPORT.md) for the one sharp edge (recency decay also hides just-confirmed winners) and the fix queued for it.
 
 ## The flywheel
 

@@ -18,7 +18,7 @@ source-compatible — no changes needed. Verified 2026-08-04 with a live stdio
 probe: all 5 tools listed, `FindInput` schema shape unchanged, annotations
 intact, `librarian_stats` answered from the live DB (3,125 skills), counter
 wrote one JSONL line with client name+version. Pre-migration code:
-`server.py.bak-20260804-mcp2`. Other agents (Cursor, Grok, Goose, MiniMax)
+`_INFRA/backups/the_librarian-server.py.bak-20260804-mcp2` (outside the repo). Other agents (Cursor, Grok, Goose, MiniMax)
 launch the same venv — running instances keep the old code until restarted.
 
 ## 2026-07-05 (collection reorg, stats payload fix, health check)
@@ -111,3 +111,17 @@ uv venv (Python 3.12) at `.venv`, registered as `skill-librarian` in `~/.claude.
 
 ### Built (Claude.ai session)
 `server.py` v1: 5 tools (find / brainstorm / report / reindex / stats), Ollama embeddings, MMR + recency decay + wildcards, SQLite WAL, append-only logs.
+
+## 2026-09-05 — mattpocock/skills picks (11 in)
+Kika asked for grill-me + handoff from https://github.com/mattpocock/skills and "anything else worthy". Pulled 11, each folder carries a one-line `SOURCE.txt`: `grilling` + its `grill-me` stub, `wait-what`, `teach` → general/productivity · `handoff`, `claude-handoff` (background `claude --bg` variant) → agents/memory · `writing-for-agents` (+SKILL-MECHANICS.md) → agents/skills-tooling · `diagnosing-bugs` (feedback-loop-first, ships hitl-loop script), `retro` → agents/claude-code-workflow · `prototype` → web/artifact · `wizard` (bash wizard for human-only setup steps, template.sh) → agents/agent-tools. Skipped: the ticket-driven engineering flow (setup-matt-pocock-skills, triage, to-spec, to-tickets, wayfinder, implement, code-review, tdd, ask-matt, codebase-design, domain-modeling, improve-codebase-architecture) — needs an issue tracker + CONTEXT.md convention Kika doesn't run; `research` (wigolo covers it); `to-questionnaire` (team-shaped); `git-guardrails-claude-code` (already in collection); the misc TS-course skills; in-progress writing-beats/fragments/shape, loop-me, implement-spec, setup-ts-deep-modules. Same day: sort/ triage (yard-sale pass 7), claude-blog-main out (pass 8), skill-judge Grok port → ~/.grok/skills.
+
+## 2026-09-05 — ponytail picks (3 in)
+From https://github.com/DietrichGebert/ponytail: `ponytail` (lazy-senior-dev ladder, lite/full/ultra), `ponytail-review` (diff over-engineering review), `ponytail-audit` (repo-wide) → agents/claude-code-workflow, SOURCE.txt in each. Deliberately skipped the plugin install path (SessionStart hook, ~/.claude flag file, statusline, mode tracker — always-on is not wanted after the 2026-08-30 hook cleanup) and the fluff skills `ponytail-gain` (benchmark scoreboard), `ponytail-help` (plugin cheat sheet), `ponytail-debt` (only useful with the `ponytail:` comment convention).
+
+## 2026-09-12 — shallower path wins inside a prefix
+`rank()` now sorts by (prefix order, depth, path). Before, ties inside `kika-skills` fell to alphabetical path, so `kika-skills/akakika-skills/skills/session-rituals/butterfly-effect` beat the personal `kika-skills/butterfly-effect`. Personal root-level overrides now win over pack copies of the same name. Backup of the previous server.py in `_INFRA/backups/the_librarian-server.py.bak-20260912`.
+
+Same day, docs brought up to the post-trim collection: 888 skills indexed, two roots (`categories/`, `kika-skills/`; `00-INBOX/` and `v8v/` no longer exist), `LIBRARIAN_CANONICAL_PREFIXES` is `kika-skills,categories` in all five agent configs since the 2026-08 trim and re-bucketing. Third snapshot added to USAGE-REPORT.md. The stray `server.py.bak-20260804-mcp2` left in the repo root by the 2026-08-04 migration moved to `_INFRA/backups/`.
+
+### Considered and dropped — bastra-recall-style additions
+A Claude Desktop handoff proposed three things: a `use_when` frontmatter list weighted 2x over the description, backfilled into every SKILL.md by script; Claude Code hooks that query the librarian at session start, before every edit and after every failed command; and one shared HTTP daemon with stdio forwarders per client. Checked against the code and the DB, none of it earns its place. 521 of the 888 descriptions already carry "use when" trigger phrasing and frontmatter is already part of the embedded text, so a hand-written `use_when` is picked up today for free, while a backfill derived from the description would only double-weight the same signal and rewrite 888 files, most of them third-party. The 25 newest `worked: false` notes are all "no matching skill exists", which a field weight cannot fix and `librarian_gaps` can. Always-on hooks contradict the 2026-08-30 hook cleanup and would inject skill names on every Edit call; the model-decides path already reports on ~88% of queries. The daemon solves a drift that cannot happen: the five agents share one local SQLite WAL file, not synced copies, and CLAUDE.md has said "do not daemonize" since day one.

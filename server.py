@@ -229,11 +229,15 @@ def iter_skill_files() -> List[Path]:
             files.append(Path(root) / "SKILL.md")
 
     def rank(p: Path):
+        # (prefix order, depth, path): inside one prefix a shallower path wins, so a
+        # personal override at kika-skills/<name> beats the same name nested in a
+        # pack such as kika-skills/akakika-skills/skills/.../<name> (2026-09-12)
         rel = str(p.relative_to(SKILLS_DIR))
+        depth = rel.count("/")
         for i, prefix in enumerate(CANONICAL_PREFIXES):
             if rel.startswith(prefix.rstrip("/") + "/"):
-                return (i, str(p))
-        return (len(CANONICAL_PREFIXES), str(p))
+                return (i, depth, str(p))
+        return (len(CANONICAL_PREFIXES), depth, str(p))
 
     return sorted(files, key=rank)
 

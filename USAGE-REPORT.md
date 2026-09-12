@@ -1,6 +1,29 @@
 # The librarian in production — usage report
 
-Two snapshots, newest first. All numbers straight from `~/.skill_librarian/librarian.db` — the append-only logs the librarian keeps for itself.
+Three snapshots, newest first. All numbers straight from `~/.skill_librarian/librarian.db` — the append-only logs the librarian keeps for itself.
+
+## Update — three months in (snapshot 2026-09-12)
+
+| Metric | 2026-09-12 | 2026-08-04 |
+|---|---|---|
+| Skills indexed | 888 | 3,125 |
+| Queries served | 366 (363 `find`, 3 `brainstorm`) | 130 |
+| Active days | 53 of 95 | 26 of 56 |
+| Outcome reports filed by agents | 284 (on 179 distinct skills) | 76 |
+| Report rate | ~78% of find queries | ~59% |
+| Reported **worked** | 106 | 37 |
+| Reported **didn't work / not used** | 178 | 39 |
+| Skills surfaced at least once | 410 of 888 (46%) | 302 (9.7%) |
+| Skills never surfaced | 478 (54%) | 2,823 (90.3%) |
+
+What five more weeks added:
+
+- **The collection shrank by 72% and the librarian didn't notice.** The 2026-08-06 trim and the 2026-08-31 re-bucketing took the index from 3,125 to 888 skills (duplicates, mass-scraped SaaS wrappers and never-surfaced off-stack skills archived, nothing deleted). Same pipeline, same tools; a full reindex now takes seconds. Of the 525 distinct skills that have surfaced since June, 115 were archived in the trim.
+- **The companion skill moved the needle.** `using-the-skill-librarian` shipped on 2026-08-04, the day of the last snapshot. The 235 queries since then drew 206 outcome reports (~88%), up from ~59% before it. Agents now report rejections as well as uses, which is what the skill asks for.
+- **The rewrite list is no longer empty.** `low_success_rate` (≥3 uses, under 50% worked) lists 11 skills for the first time, led by the MCP family: `mcp-integration` (6 uses, 1 worked), `mcporter` (5, 0), `skill-installer` (5, 0), `mcp-building` (4, 0). Read with the notes, these are the skills that surface for every MCP-flavoured intent and get rejected as the wrong tool for that exact job. That is a ranking-precision signal on a crowded family, not proof the skills are bad; the curation move is sharper descriptions so they stop answering each other's queries.
+- **Worked rate dipped from 49% to 37%.** Same cause as the point above: more rejections are being filed, so the denominator grew faster than the wins. The split between "not used" and "used and failed" (improvement 3 below) is now the most useful thing to add.
+- **Hot skills:** `mcp-server-patterns` (21), `mcp-building` (17), `apple-hig-swiftui-macos` (16), `mcp-integration` (15), `mcporter` (13), `macos-menubar-swiftui` (13). The summer of MCP servers and menubar apps, in the log.
+- **Considered and dropped:** a proposal to add a weighted `use_when` frontmatter field, automatic recall hooks in Claude Code, and a shared daemon. The reasons are in [CHANGELOG.md](CHANGELOG.md) under 2026-09-12. The improvements queued in July (best-similarity logging, `librarian_gaps`, a `used` flag, success clears recency) remain the plan.
 
 ## Update — eight weeks in (snapshot 2026-08-04)
 

@@ -34,7 +34,7 @@ Core principle: **agents read recommendations, write only outcomes.** They never
 
 Every stage is local and free: Ollama embeddings, SQLite, and (optionally) Apple Intelligence.
 
-**→ [In production since June: real usage numbers](USAGE-REPORT.md)** — 130 queries, 76 agent-filed outcome reports across two snapshots (latest 2026-08-04), what worked and what's queued next.
+**→ [In production since June: real usage numbers](USAGE-REPORT.md)** — 366 queries, 284 agent-filed outcome reports across three snapshots (latest 2026-09-12), what worked and what's queued next.
 
 ## Pipeline (one find request, end to end)
 
@@ -42,7 +42,7 @@ In plain words: every skill's description is turned once into an *embedding* —
 
 ```
 intent ─→ Ollama embed (nomic-embed-text, /api/embed)
-       ─→ cosine vs ~3,000 skill vectors (SQLite)      ← "which skills mean the same thing?"
+       ─→ cosine vs every skill vector (SQLite)        ← "which skills mean the same thing?"
        ─→ MMR diversity + recency decay                ← anti-monotony (see below)
        ─→ [opt-in] AFM rerank: Apple's on-device model scores fit 1–10,
           why / why-not per candidate, final pick       (bin/afm-rerank, ~6–12s)
@@ -82,7 +82,7 @@ Add to `~/.claude.json` (or project `.mcp.json`), with paths adjusted to where y
 }
 ```
 
-The skills dir is scanned recursively for `SKILL.md` files (standard agent-skill format: YAML frontmatter with `name` + `description`, body below). `OLLAMA_HOST` can point at a remote node (e.g. over Tailscale) to offload embedding — though an M4 Max reindexes 3,000 skills in ~2 minutes locally.
+The skills dir is scanned recursively for `SKILL.md` files (standard agent-skill format: YAML frontmatter with `name` + `description`, body below). `OLLAMA_HOST` can point at a remote node (e.g. over Tailscale) to offload embedding — though an M4 Max reindexed the original 3,000-skill collection in ~2 minutes locally (it has since been trimmed to under 900, which takes seconds).
 
 ## First run
 
@@ -122,8 +122,8 @@ always file a `librarian_report` afterward — the reports are what make the col
 curate itself.
 
 The joke writes itself, but it's real: **the only skill you install is the one that
-teaches agents to ask the librarian.** In eight weeks of production use, that habit
-produced outcome reports on ~59% of queries, unprompted.
+teaches agents to ask the librarian.** In three months of production use, that habit
+produced outcome reports on ~78% of queries, unprompted (~88% since this skill shipped).
 
 ## Why it won't recommend the same 3 skills forever
 
@@ -135,7 +135,7 @@ The failure mode this design exists to kill: a naive retriever recommends the sa
 
 The AFM reranker runs *after* these — it reorders the already-diversified shortlist, so it can't reintroduce monotony.
 
-Eight weeks of real data says it works: 302 distinct skills surfaced across 130 queries. See the [usage report](USAGE-REPORT.md) for the one sharp edge (recency decay also hides just-confirmed winners) and the fix queued for it.
+Three months of real data says it works: 525 distinct skills surfaced across 366 queries. See the [usage report](USAGE-REPORT.md) for the one sharp edge (recency decay also hides just-confirmed winners) and the fix queued for it.
 
 ## The flywheel
 
@@ -148,7 +148,7 @@ Every `librarian_find` is logged. Every `librarian_report` is logged. Run `libra
 - `MMR_LAMBDA_BRAINSTORM` (0.45) — brainstorm leans diverse
 - `RERANK_TIMEOUT` (30s) — AFM reranker budget before falling back to embed order
 
-Env knobs: `LIBRARIAN_CANONICAL_PREFIXES` (which top-level dirs win duplicate-name races, e.g. `categories`), `LIBRARIAN_RERANK_BIN` (path to afm-rerank; empty disables rerank).
+Env knobs: `LIBRARIAN_CANONICAL_PREFIXES` (which top-level dirs win duplicate-name races, e.g. `categories`; inside one prefix the shallower path wins, so a root-level override beats the same name nested in a pack), `LIBRARIAN_RERANK_BIN` (path to afm-rerank; empty disables rerank).
 
 ## Hard rules the code keeps
 

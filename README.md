@@ -141,6 +141,8 @@ Three months of real data says it works: 525 distinct skills surfaced across 366
 
 Every `librarian_find` is logged. Every `librarian_report` is logged. Run `librarian_stats` weekly: never-surfaced skills → kill, low-success skills → rewrite descriptions, queries matching nothing → skills you should build. The collection curates itself from usage.
 
+First time it paid out (2026-09-12): after three months the rewrite list went from empty to 11 skills, and it is almost entirely one family — `mcp-integration` (6 uses, 1 worked), `mcporter` (5, 0), `skill-installer` (5, 0), `mcp-building` (4, 0). The agents' notes explain why: those four surface for every MCP-flavoured intent and get rejected as the wrong tool for that exact job. No static review would have found that; the descriptions all read fine. The fix is a description pass on four files, not a new feature. Details in the [usage report](USAGE-REPORT.md).
+
 ## Tuning knobs (top of server.py)
 
 - `RECENCY_WINDOW` / `RECENCY_PENALTY` — how hard repeats get punished

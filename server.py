@@ -509,7 +509,8 @@ async def librarian_reindex() -> str:
 async def librarian_stats() -> str:
     """Digest of collection health for curation decisions.
 
-    Shows: most-recommended skills, never-surfaced skills (kill candidates),
+    Shows: most-recommended skills, never-surfaced skills (kill candidates,
+    plus the 100 oldest never-recommended ones for the weekly review),
     skills with poor success rates (rewrite candidates), and recent queries
     that matched nothing well (gaps — skills you should build).
     """
@@ -526,7 +527,27 @@ async def librarian_stats() -> str:
         s = outcome_stats(conn, name)
         if s["uses"] and s["uses"] >= 3 and (s["success_rate"] or 0) < 0.5:
             failing.append({"skill": name, **s})
-    never_surfaced = sorted(n for n in all_skills if n not in appearance)
+    # "never" means over the whole query log, not just the recent window
+    ever: set = set()
+    for (returned,) in conn.execute("SELECT returned FROM query_log"):
+        ever.update(json.loads(returned))
+    never_surfaced = sorted(n for n in all_skills if n not in ever)
+    # Oldest first by SKILL.md file date, for the weekly unused-skills review
+    oldest = []
+    for name, path in conn.execute("SELECT name, path FROM skills"):
+        if name in ever:
+            continue
+        try:
+            st = Path(path).parent.stat()
+        except OSError:
+            continue
+        # When the skill folder landed on this Mac. Unzipped packs keep fake 1979
+        # dates in mtime and birth time; ctime is the real arrival then.
+        when = getattr(st, "st_birthtime", st.st_mtime)
+        if when < 1577836800:  # before 2020
+            when = st.st_ctime
+        oldest.append((when, name, path))
+    oldest.sort()
     hot = sorted(appearance.items(), key=lambda kv: -kv[1])[:10]
     conn.close()
     # Digest, not a dump: with a young query_log most of the collection has
@@ -540,8 +561,19 @@ async def librarian_stats() -> str:
             "sample": never_surfaced[::step][:20],
             "full_list": "sqlite3 ~/.skill_librarian/librarian.db — skills not named in query_log.returned",
         },
+        # Never recommended is not useless: the librarian only knows what agents asked for.
+        "never_recommended_oldest_first": [
+            {"skill": n, "file_date": time.strftime("%Y-%m-%d", time.localtime(m)),
+             "path": _rel_to_collection(p)}
+            for m, n, p in oldest[:100]
+        ],
         "low_success_rate (rewrite candidates)": failing,
     }, indent=2)
+
+def _rel_to_collection(path: str) -> str:
+    folder = Path(path).resolve().parent
+    root = SKILLS_DIR.resolve()
+    return str(folder.relative_to(root)) if folder.is_relative_to(root) else str(folder)
 
 # ---------------------------------------------------------------- entry
 

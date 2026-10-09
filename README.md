@@ -46,6 +46,8 @@ intent ─→ Ollama embed (nomic-embed-text, /api/embed)
        ─→ MMR diversity + recency decay                ← anti-monotony (see below)
        ─→ [opt-in] AFM rerank: Apple's on-device model scores fit 1–10,
           why / why-not per candidate, final pick       (bin/afm-rerank, ~6–12s)
+       ─→ [opt-in] soft filter: a local decision model marks the top 4
+          "likely" or "weak match", likely first, nothing dropped (nimble, ~3–5s)
        ─→ compact JSON shortlist
 ```
 
@@ -90,6 +92,10 @@ The skills dir is scanned recursively for `SKILL.md` files (standard agent-skill
 > use librarian_reindex
 > use librarian_find with intent "package my ollama wrapper for distribution"
 ```
+
+## Soft filter (optional, local decision model)
+
+After the AFM rerank, `librarian_find` can ask a small local model whether each of the top candidates fits the intent. Skills it marks `"match": "likely"` come first; `"weak match"` ones stay in the list below them. Nothing is dropped. Settings in `~/.skill_librarian/soft_filter.json` (`enabled`, `model`, `judge_top`, `timeout_s`); `LIBRARIAN_SOFT_FILTER=off` turns it off. A slow or missing model returns the previous order. Each find appends one line to `~/.skill_librarian/soft_filter.jsonl`. Bench and test set: `bench/decision-filter-2026-10-09/` (nimble 72% precision vs 33% without; laya models not usable).
 
 ## AFM reranker (optional, Apple Intelligence)
 

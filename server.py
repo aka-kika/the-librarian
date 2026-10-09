@@ -19,6 +19,7 @@ Config (env):
   LIBRARIAN_EMBED_MODEL  default: nomic-embed-text
 """
 
+import asyncio
 import hashlib
 import json
 import math
@@ -47,6 +48,13 @@ EMBED_MODEL = os.environ.get("LIBRARIAN_EMBED_MODEL", "nomic-embed-text")
 
 RERANK_BIN = os.environ.get("LIBRARIAN_RERANK_BIN", "")  # e.g. bin/afm-rerank; empty = off
 RERANK_TIMEOUT = 30.0        # seconds; on timeout/error find falls back to embed order
+# Soft filter: a local decision model marks each top candidate "likely" or
+# "weak match" and find shows likely ones first. Nothing is dropped. On by the
+# settings file, off with LIBRARIAN_SOFT_FILTER=off. Tested 2026-10-09
+# (bench/decision-filter-2026-10-09): nimble lifted precision from 33% to 72%.
+SOFT_FILTER_CONFIG = Path(os.environ.get(
+    "LIBRARIAN_SOFT_FILTER_CONFIG", "~/.skill_librarian/soft_filter.json")).expanduser()
+SOFT_FILTER_LOG = DB_PATH.parent / "soft_filter.jsonl"
 
 RECENCY_WINDOW = 10          # last N queries considered for the repeat penalty
 RECENCY_PENALTY = 0.15       # score subtracted per recent appearance
@@ -331,7 +339,7 @@ def mmr_select(query_vec, candidates, k, lam, recent_counts):
         pool.remove(best)
     return selected
 
-def retrieve(query: str, k: int, lam: float, wildcards: int = 0) -> List[dict]:
+def retrieve(query: str, k: int, lam: float, wildcards: int = 0, log: bool = True) -> List[dict]:
     conn = db()
     rows = conn.execute(
         "SELECT s.name, s.description, e.dim, e.vec FROM skills s JOIN embeddings e ON e.skill_id=s.id"
@@ -362,14 +370,17 @@ def retrieve(query: str, k: int, lam: float, wildcards: int = 0) -> List[dict]:
             "recently_recommended": recent.get(name, 0),
             **stats,
         })
-    conn.execute(
-        "INSERT INTO query_log(ts, mode, query, returned) VALUES (?,?,?,?)",
-        (time.time(), "brainstorm" if wildcards else "find", query,
-         json.dumps([r["skill"] for r in results])),
-    )
-    conn.commit()
+    if log:
+        log_query(conn, "brainstorm" if wildcards else "find", query, results)
     conn.close()
     return results
+
+def log_query(conn, mode: str, query: str, results: List[dict]) -> None:
+    conn.execute(
+        "INSERT INTO query_log(ts, mode, query, returned) VALUES (?,?,?,?)",
+        (time.time(), mode, query, json.dumps([r["skill"] for r in results])),
+    )
+    conn.commit()
 
 def afm_rerank(intent: str, results: List[dict]):
     """Opt-in deliberation pass: a local LLM (Apple Foundation Model via
@@ -402,6 +413,100 @@ def afm_rerank(intent: str, results: List[dict]):
         return merged, pick if pick in by_name else None
     except Exception:
         return results, None
+
+def soft_filter_settings() -> Optional[dict]:
+    """The soft filter's settings, or None when it is off."""
+    if os.environ.get("LIBRARIAN_SOFT_FILTER", "").lower() in ("off", "0", "false", "no"):
+        return None
+    try:
+        cfg = json.loads(SOFT_FILTER_CONFIG.read_text())
+    except Exception:
+        return None
+    if not cfg.get("enabled"):
+        return None
+    return {
+        "model": str(cfg.get("model", "nimble:latest")),
+        "judge_top": max(2, int(cfg.get("judge_top", 5))),
+        "timeout_s": float(cfg.get("timeout_s", 5.0)),
+    }
+
+FIT_PROMPT = """Schema:
+field: fit
+meaning: Does the skill help accomplish the user's intent? Judge only from the skill description.
+choices:
+A: yes, the skill is directly useful for this task
+B: no, the skill is unrelated, too generic, or for a different task
+
+Context:
+Intent: {intent}
+Skill: {skill} - {description}
+
+Field: fit
+Answer:"""
+
+async def _judge_fit(client: httpx.AsyncClient, model: str, intent: str, r: dict) -> bool:
+    resp = await client.post(f"{OLLAMA_HOST}/api/generate", json={
+        "model": model, "stream": False, "think": False, "keep_alive": "30m",
+        "prompt": FIT_PROMPT.format(intent=intent[:1000], skill=r["skill"],
+                                    description=(r.get("description") or "")[:400]),
+        "options": {"num_predict": 3, "temperature": 0},
+    })
+    resp.raise_for_status()
+    return resp.json().get("response", "").strip().upper().startswith("A")
+
+async def soft_filter(intent: str, candidates: List[dict], k: int):
+    """Mark the top candidates "likely" or "weak match" and put likely ones
+    first. Nothing is dropped: weak matches stay in the list, below. Any
+    failure or a slow model returns the embedding order untouched."""
+    cfg = soft_filter_settings()
+    if not cfg or len(candidates) < 2:
+        return candidates[:k], None
+    judged = candidates[: cfg["judge_top"]]
+    verdicts: List[Optional[bool]] = [None] * len(judged)
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=cfg["timeout_s"]) as client:
+            tasks = [asyncio.create_task(_judge_fit(client, cfg["model"], intent, r)) for r in judged]
+            done, pending = await asyncio.wait(tasks, timeout=cfg["timeout_s"])
+            for t in pending:
+                t.cancel()
+            for i, t in enumerate(tasks):
+                if t in done and not t.cancelled() and t.exception() is None:
+                    verdicts[i] = t.result()
+    except Exception:
+        pass
+    ms = round((time.monotonic() - t0) * 1000)
+    meta = {"model": cfg["model"], "ms": ms}
+    if all(v is None for v in verdicts):
+        meta["status"] = "skipped (model slow or down)"
+        _log_soft_filter(intent, judged, verdicts, meta)
+        return candidates[:k], meta
+    marked = []
+    for r, v in zip(judged, verdicts):
+        match = {True: "likely", False: "weak match", None: "not judged"}[v]
+        marked.append({**r, "match": match})
+    likely = [r for r in marked if r["match"] == "likely"]
+    unjudged = [r for r in marked if r["match"] == "not judged"]
+    weak = [r for r in marked if r["match"] == "weak match"]
+    ordered = likely + unjudged + weak + candidates[len(judged):]
+    meta["status"] = "ok"
+    meta["likely"] = [r["skill"] for r in likely]
+    meta["weak"] = [r["skill"] for r in weak]
+    _log_soft_filter(intent, judged, verdicts, meta)
+    return ordered[:k], meta
+
+def _log_soft_filter(intent: str, judged: List[dict], verdicts, meta: dict) -> None:
+    """One line per find, for the keep-or-drop review (weekly maintenance)."""
+    try:
+        with SOFT_FILTER_LOG.open("a") as f:
+            f.write(json.dumps({
+                "ts": time.time(), "intent": intent[:300],
+                "order_in": [r["skill"] for r in judged],
+                "apple_fit": [r.get("fit") for r in judged],
+                "verdicts": verdicts, **meta,
+            }) + "\n")
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------- tool inputs
 
@@ -438,10 +543,20 @@ async def librarian_find(params: FindInput) -> str:
     recommended in the last few queries are deliberately downweighted to avoid
     monotone suggestions. Logs the query for collection analytics.
     """
-    results = retrieve(params.intent, params.k, MMR_LAMBDA_FIND)
+    cfg = soft_filter_settings()
+    pool = max(params.k, cfg["judge_top"]) if cfg else params.k
+    results = retrieve(params.intent, pool, MMR_LAMBDA_FIND, log=False)
     results, pick = afm_rerank(params.intent, results)
+    results, judged = await soft_filter(params.intent, results, params.k)
+    conn = db()
+    log_query(conn, "find", params.intent, results)
+    conn.close()
     out = {"intent": params.intent, "recommendations": results}
-    if pick:
+    if judged:
+        out["soft_filter"] = judged
+        if judged.get("status") == "ok":
+            out["hint"] = 'Skills with match "likely" come first; "weak match" ones a local model doubted, still worth a glance.'
+    if pick and pick in {r["skill"] for r in results}:
         out["pick"] = pick
     return json.dumps(out, indent=2)
 

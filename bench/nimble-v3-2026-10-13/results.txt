@@ -1,0 +1,15 @@
+== old nimble (rc1): 451 ms per pair, memory 10.1 GB
+   {'precision': 0.72, 'good dropped': '8/39', 'bad kept': '12/81'}
+   same answers as the 10-09 run on 0.40.x: 524/524
+   10-09 run: {'precision': 0.72, 'good dropped': '8/39', 'bad kept': '12/81'}
+== nimble-v3: 476 ms per pair, memory 17.7 GB
+   noul AUC 0.919
+   score AUC 0.924
+   noul >= 0.3: {'precision': 0.8, 'good dropped': '7/39', 'bad kept': '8/81'}
+   noul >= 0.5: {'precision': 0.81, 'good dropped': '9/39', 'bad kept': '7/81'}
+   noul >= 0.7: {'precision': 0.79, 'good dropped': '12/39', 'bad kept': '7/81'}
+   noul >= 0.85: {'precision': 0.86, 'good dropped': '15/39', 'bad kept': '4/81'}
+   score >= 1.0: {'precision': 0.78, 'good dropped': '7/39', 'bad kept': '9/81'}
+   score >= 1.5: {'precision': 0.85, 'good dropped': '11/39', 'bad kept': '5/81'}
+   score >= 2.0: {'precision': 0.88, 'good dropped': '16/39', 'bad kept': '3/81'}
+== laya (10-09) score AUC 0.749

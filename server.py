@@ -52,6 +52,8 @@ RERANK_TIMEOUT = 30.0        # seconds; on timeout/error find falls back to embe
 # "weak match" and find shows likely ones first. Nothing is dropped. On by the
 # settings file, off with LIBRARIAN_SOFT_FILTER=off. Tested 2026-10-09
 # (bench/decision-filter-2026-10-09): nimble lifted precision from 33% to 72%.
+# nimble-v3 (bench/nimble-v3-2026-10-13) reached 80% and gives probabilities,
+# so likely ones are also ordered by fit; on trial until FMD 2026-10-16.
 SOFT_FILTER_CONFIG = Path(os.environ.get(
     "LIBRARIAN_SOFT_FILTER_CONFIG", "~/.skill_librarian/soft_filter.json")).expanduser()
 SOFT_FILTER_LOG = DB_PATH.parent / "soft_filter.jsonl"
@@ -426,9 +428,16 @@ def soft_filter_settings() -> Optional[dict]:
         return None
     return {
         "model": str(cfg.get("model", "nimble:latest")),
+        "fallback_model": str(cfg.get("fallback_model") or ""),
+        "likely_at": float(cfg.get("likely_at", 0.3)),
         "judge_top": max(2, int(cfg.get("judge_top", 5))),
         "timeout_s": float(cfg.get("timeout_s", 5.0)),
     }
+
+def _is_decision_api(model: str) -> bool:
+    """nimble-v3 and laya answer on Ollama's /v1/systemone with probabilities;
+    the old nimble answers a text prompt with A or B."""
+    return model.startswith(("nimble-v3", "laya"))
 
 FIT_PROMPT = """Schema:
 field: fit
@@ -454,40 +463,75 @@ async def _judge_fit(client: httpx.AsyncClient, model: str, intent: str, r: dict
     resp.raise_for_status()
     return resp.json().get("response", "").strip().upper().startswith("A")
 
+FIT_QUESTION = "Does this skill help accomplish the user's intent? Judge only from the skill description."
+
+async def _judge_fit_prob(client: httpx.AsyncClient, model: str, intent: str, r: dict) -> float:
+    """Probability (0 to 1) that the skill fits, from the decision API."""
+    resp = await client.post(f"{OLLAMA_HOST}/v1/systemone", json={
+        "model": model, "keep_alive": "30m",
+        "state": f"Intent: {intent[:1000]}\nSkill: {r['skill']} - {(r.get('description') or '')[:600]}",
+        "questions": {"fit": {"type": "noul", "instructions": FIT_QUESTION, "criteria": {
+            "true": "The skill is directly useful for this task.",
+            "false": "The skill is unrelated, too generic, or for a different task."}}},
+    })
+    resp.raise_for_status()
+    return float(resp.json()["answers"]["fit"]["noul"])
+
+async def _judge_all(model: str, intent: str, judged: List[dict], timeout_s: float) -> list:
+    """One answer per candidate (a probability, a bool, or None when it failed)."""
+    judge = _judge_fit_prob if _is_decision_api(model) else _judge_fit
+    out: list = [None] * len(judged)
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            tasks = [asyncio.create_task(judge(client, model, intent, r)) for r in judged]
+            done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+            for t in pending:
+                t.cancel()
+            for i, t in enumerate(tasks):
+                if t in done and not t.cancelled() and t.exception() is None:
+                    out[i] = t.result()
+    except Exception:
+        pass
+    return out
+
 async def soft_filter(intent: str, candidates: List[dict], k: int):
     """Mark the top candidates "likely" or "weak match" and put likely ones
-    first. Nothing is dropped: weak matches stay in the list, below. Any
+    first. Nothing is dropped: weak matches stay in the list, below. With a
+    decision-API model, each group is also ordered by the model's probability.
+    When the main model gives nothing, the fallback model is tried. Any
     failure or a slow model returns the embedding order untouched."""
     cfg = soft_filter_settings()
     if not cfg or len(candidates) < 2:
         return candidates[:k], None
     judged = candidates[: cfg["judge_top"]]
-    verdicts: List[Optional[bool]] = [None] * len(judged)
     t0 = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=cfg["timeout_s"]) as client:
-            tasks = [asyncio.create_task(_judge_fit(client, cfg["model"], intent, r)) for r in judged]
-            done, pending = await asyncio.wait(tasks, timeout=cfg["timeout_s"])
-            for t in pending:
-                t.cancel()
-            for i, t in enumerate(tasks):
-                if t in done and not t.cancelled() and t.exception() is None:
-                    verdicts[i] = t.result()
-    except Exception:
-        pass
+    model = cfg["model"]
+    answers = await _judge_all(model, intent, judged, cfg["timeout_s"])
+    fell_back = False
+    if all(a is None for a in answers) and cfg["fallback_model"]:
+        fell_back, model = True, cfg["fallback_model"]
+        answers = await _judge_all(model, intent, judged, cfg["timeout_s"])
+    probs = [a if isinstance(a, float) else None for a in answers]
+    verdicts: List[Optional[bool]] = [
+        None if a is None else (a >= cfg["likely_at"] if isinstance(a, float) else a) for a in answers]
     ms = round((time.monotonic() - t0) * 1000)
-    meta = {"model": cfg["model"], "ms": ms}
+    meta = {"model": model, "ms": ms}
+    if fell_back:
+        meta["fallback"] = True
+    if any(p is not None for p in probs):
+        meta["probs"] = [None if p is None else round(p, 3) for p in probs]
     if all(v is None for v in verdicts):
         meta["status"] = "skipped (model slow or down)"
         _log_soft_filter(intent, judged, verdicts, meta)
         return candidates[:k], meta
     marked = []
-    for r, v in zip(judged, verdicts):
+    for r, v, p in zip(judged, verdicts, probs):
         match = {True: "likely", False: "weak match", None: "not judged"}[v]
-        marked.append({**r, "match": match})
-    likely = [r for r in marked if r["match"] == "likely"]
+        marked.append({**r, "match": match, **({"fit_prob": round(p, 2)} if p is not None else {})})
+    by_prob = lambda r: -r.get("fit_prob", 0.0)  # stable: ties keep embedding order
+    likely = sorted([r for r in marked if r["match"] == "likely"], key=by_prob)
     unjudged = [r for r in marked if r["match"] == "not judged"]
-    weak = [r for r in marked if r["match"] == "weak match"]
+    weak = sorted([r for r in marked if r["match"] == "weak match"], key=by_prob)
     ordered = likely + unjudged + weak + candidates[len(judged):]
     meta["status"] = "ok"
     meta["likely"] = [r["skill"] for r in likely]

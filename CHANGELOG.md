@@ -2,6 +2,20 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-13 (soft filter on nimble-v3, trial until FMD 2026-10-16)
+
+### Changed — soft filter can use a decision-API model, with a fallback
+`soft_filter.json` now takes `fallback_model` and `likely_at`. Models named
+`nimble-v3*` or `laya*` are asked on Ollama's `/v1/systemone` and return a
+fit probability; a skill is "likely" at p >= `likely_at` (0.3), and the likely
+and weak groups are each ordered by p. If the main model answers nothing, the
+fallback model (old `nimble:latest`, text prompt) is tried. The log line gains
+`probs` and `fallback`. Why: on the 2026-10-09 test set nimble-v3 reached 80%
+precision against old nimble's 72% at the same speed
+(`bench/nimble-v3-2026-10-13/results.txt`). Needs Ollama 0.40.4 (test build
+rc1 on the main Mac). Review at FMD with `bench/nimble-v3-2026-10-13/fmd_review.py`;
+the old settings are in `_INFRA/backups/soft_filter.json.2026-10-13-before-v3`.
+
 ## 2026-08-04 (mcp SDK 2.0 migration)
 
 ### Changed — migrated off the removed FastMCP API

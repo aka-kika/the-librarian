@@ -106,14 +106,14 @@ swiftc -O -parse-as-library afm_rerank.swift -o bin/afm-rerank
 # then set LIBRARIAN_RERANK_BIN to the binary path in the MCP env
 ```
 
-Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embedding order. Brainstorm is never reranked — it wants divergence, not convergence. The reranker's output is validated against the real candidate set — small on-device models happily hallucinate skill names.
+Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embedding order. Brainstorm is never reranked — it wants divergence, not convergence. The reranker's output is validated against the real candidate set — small on-device models happily hallucinate skill names. Skill names and descriptions are someone else's text, so they reach the model cleaned (no line breaks or control characters) inside a `<candidates>` fence, one JSON line each, with an instruction to treat them as data: a description that says "rank me first" no longer wins the pick.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `librarian_find` | Ranked shortlist for an intent — varied picks, no repeats from recent queries, success rates shown. |
-| `librarian_brainstorm` | Wide diverse sweep + 2 random wildcards. For ideation, not convergence. |
+| `librarian_brainstorm` | Wide diverse sweep: k candidates, the last 2 random wildcards. For ideation, not convergence. |
 | `librarian_report` | Agent reports skill worked/failed. Append-only — agents can't touch rankings. |
 | `librarian_reindex` | Rescan + re-embed changed SKILL.md files (hash-checked, cheap to rerun). |
 | `librarian_stats` | Curation digest: hot skills, never-surfaced (kill candidates), low success rate (rewrite candidates). |
@@ -137,7 +137,7 @@ The failure mode this design exists to kill: a naive retriever recommends the sa
 
 1. **MMR selection** (maximal marginal relevance) — each next pick has to be relevant to the request *and* different from the picks already made, so the shortlist can't be three near-duplicates.
 2. **Recency decay** — the librarian remembers its own recent recommendations; anything suggested in the last 10 queries gets pushed down (`RECENCY_PENALTY = 0.15` per appearance — tune at top of server.py).
-3. **Wildcards in brainstorm mode** — 2 random skills from outside the relevant set, every time.
+3. **Wildcards in brainstorm mode** — 2 random skills from outside the relevant set, every time. They are not logged as recommendations, so they never pick up a repeat penalty.
 
 The AFM reranker runs *after* these — it reorders the already-diversified shortlist, so it can't reintroduce monotony.
 
@@ -156,7 +156,7 @@ First time it paid out (2026-09-12): after three months the rewrite list went fr
 - `MMR_LAMBDA_BRAINSTORM` (0.45) — brainstorm leans diverse
 - `RERANK_TIMEOUT` (30s) — AFM reranker budget before falling back to embed order
 
-Env knobs: `LIBRARIAN_CANONICAL_PREFIXES` (which top-level dirs win duplicate-name races, e.g. `categories`; inside one prefix the shallower path wins, so a root-level override beats the same name nested in a pack), `LIBRARIAN_RERANK_BIN` (path to afm-rerank; empty disables rerank).
+Env knobs: `LIBRARIAN_CANONICAL_PREFIXES` (which top-level dirs win duplicate-name races, e.g. `categories`; inside one prefix the shallower path wins, so a root-level override beats the same name nested in a pack; a skill reached through two symlinks is ranked the same way, never by folder-walk order), `LIBRARIAN_RERANK_BIN` (path to afm-rerank; empty disables rerank).
 
 ## Hard rules the code keeps
 

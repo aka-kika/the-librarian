@@ -240,15 +240,17 @@ def iter_skill_files() -> List[Path]:
     """Walk SKILLS_DIR for SKILL.md files, following directory symlinks.
 
     Path.rglob doesn't follow symlinks on 3.12, which silently drops every
-    symlinked skill dir. Dedupe by realpath so loops/aliases visit once.
+    symlinked skill dir. Every alias path is collected and ranked first; only
+    then are aliases of the same physical file dropped, so the canonical path
+    wins whichever alias os.walk reached first (2026-10-14). A link back to one
+    of its own parent folders is not followed, so loops end.
     """
-    seen, files = set(), []
+    files, chain = [], {}
     for root, dirs, names in os.walk(SKILLS_DIR, followlinks=True):
-        real = os.path.realpath(root)
-        if real in seen:
-            dirs[:] = []  # already visited this physical dir via another link
-            continue
-        seen.add(real)
+        # physical dirs on the path from SKILLS_DIR down to here
+        here = chain.get(os.path.dirname(root), frozenset()) | {os.path.realpath(root)}
+        chain[root] = here
+        dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) not in here]
         if "SKILL.md" in names:
             files.append(Path(root) / "SKILL.md")
 
@@ -263,7 +265,13 @@ def iter_skill_files() -> List[Path]:
                 return (i, depth, str(p))
         return (len(CANONICAL_PREFIXES), depth, str(p))
 
-    return sorted(files, key=rank)
+    out, seen = [], set()
+    for p in sorted(files, key=rank):
+        real = os.path.realpath(p)
+        if real not in seen:  # an alias of a file already kept at a better path
+            seen.add(real)
+            out.append(p)
+    return out
 
 def reindex_collection(force: bool = False) -> dict:
     """Scan SKILLS_DIR for SKILL.md files; embed new/changed; prune deleted."""
@@ -383,15 +391,17 @@ def retrieve(query: str, k: int, lam: float, wildcards: int = 0, log: bool = Tru
         cands = [(n, d, unpack(v, dim), cosine(qv, unpack(v, dim))) for n, d, dim, v in rows]
         cands.sort(key=lambda c: c[3], reverse=True)
         recent = recent_appearance_counts(conn)
-        picked = mmr_select(qv, cands[: max(k * 4, 16)], k, lam, recent)
+        # wildcards count toward k, so a brainstorm returns k items in all
+        picked = mmr_select(qv, cands[: max(k * 4, 16)], max(1, k - wildcards), lam, recent)
 
+        wild = []
         if wildcards:
             chosen = {c[0] for c in picked}
             leftovers = [c for c in cands if c[0] not in chosen]
-            picked += random.sample(leftovers, min(wildcards, len(leftovers)))
+            wild = random.sample(leftovers, min(wildcards, len(leftovers)))
 
         results = []
-        for name, desc, _vec, sim in picked:
+        for name, desc, _vec, sim in picked + wild:
             stats = outcome_stats(conn, name)
             results.append({
                 "skill": name,
@@ -401,7 +411,9 @@ def retrieve(query: str, k: int, lam: float, wildcards: int = 0, log: bool = Tru
                 **stats,
             })
         if log:
-            log_query(conn, "brainstorm" if wildcards else "find", query, results)
+            # wildcards are random, not recommendations: logging them would put
+            # the recency penalty on random skills for the next queries
+            log_query(conn, "brainstorm" if wildcards else "find", query, results[: len(picked)])
         return results
     finally:
         conn.close()
@@ -412,6 +424,13 @@ def log_query(conn, mode: str, query: str, results: List[dict]) -> None:
         (time.time(), mode, query, json.dumps([r["skill"] for r in results])),
     )
     conn.commit()
+
+def _log_find(intent: str, results: List[dict]) -> None:
+    conn = db()
+    try:
+        log_query(conn, "find", intent, results)
+    finally:
+        conn.close()
 
 def afm_rerank(intent: str, results: List[dict]):
     """Opt-in deliberation pass: a local LLM (Apple Foundation Model via
@@ -468,6 +487,15 @@ def _is_decision_api(model: str) -> bool:
     the old nimble answers a text prompt with A or B."""
     return model.startswith(("nimble-v3", "laya"))
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+
+def _one_line(text: str) -> str:
+    """Skill names and descriptions come from third-party SKILL.md files: no line
+    breaks or control characters, so one cannot fake a new prompt line such as
+    "Answer: A". A no-op on the 2026-10-14 index; the tag fence the reranker
+    got waits for the nimble-v3 verdict (FMD 2026-10-16)."""
+    return _CONTROL.sub(" ", text)
+
 FIT_PROMPT = """Schema:
 field: fit
 meaning: Does the skill help accomplish the user's intent? Judge only from the skill description.
@@ -485,8 +513,8 @@ Answer:"""
 async def _judge_fit(client: httpx.AsyncClient, model: str, intent: str, r: dict) -> bool:
     resp = await client.post(f"{OLLAMA_HOST}/api/generate", json={
         "model": model, "stream": False, "think": False, "keep_alive": "30m",
-        "prompt": FIT_PROMPT.format(intent=intent[:1000], skill=r["skill"],
-                                    description=(r.get("description") or "")[:400]),
+        "prompt": FIT_PROMPT.format(intent=intent[:1000], skill=_one_line(r["skill"]),
+                                    description=_one_line((r.get("description") or "")[:400])),
         "options": {"num_predict": 3, "temperature": 0},
     })
     resp.raise_for_status()
@@ -498,7 +526,7 @@ async def _judge_fit_prob(client: httpx.AsyncClient, model: str, intent: str, r:
     """Probability (0 to 1) that the skill fits, from the decision API."""
     resp = await client.post(f"{OLLAMA_HOST}/v1/systemone", json={
         "model": model, "keep_alive": "30m",
-        "state": f"Intent: {intent[:1000]}\nSkill: {r['skill']} - {(r.get('description') or '')[:600]}",
+        "state": f"Intent: {intent[:1000]}\nSkill: {_one_line(r['skill'])} - {_one_line((r.get('description') or '')[:600])}",
         "questions": {"fit": {"type": "noul", "instructions": FIT_QUESTION, "criteria": {
             "true": "The skill is directly useful for this task.",
             "false": "The skill is unrelated, too generic, or for a different task."}}},
@@ -594,7 +622,7 @@ class BrainstormInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     context: str = Field(..., min_length=3, max_length=4000,
                          description="The situation or problem space to riff on. Looser than an intent — describe the project state.")
-    k: int = Field(default=6, ge=3, le=10, description="How many diverse candidates to surface.")
+    k: int = Field(default=6, ge=3, le=10, description="How many diverse candidates to surface, the 2 random wildcards included.")
 
 class ReportInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -619,12 +647,12 @@ async def librarian_find(params: FindInput) -> str:
     """
     cfg = soft_filter_settings()
     pool = max(params.k, cfg["judge_top"]) if cfg else params.k
-    results = retrieve(params.intent, pool, MMR_LAMBDA_FIND, log=False)
-    results, pick = afm_rerank(params.intent, results)
+    # blocking work (HTTP, subprocess, SQLite) runs in a thread so one slow
+    # search never freezes the server's event loop for other calls
+    results = await asyncio.to_thread(retrieve, params.intent, pool, MMR_LAMBDA_FIND, log=False)
+    results, pick = await asyncio.to_thread(afm_rerank, params.intent, results)
     results, judged = await soft_filter(params.intent, results, params.k)
-    conn = db()
-    log_query(conn, "find", params.intent, results)
-    conn.close()
+    await asyncio.to_thread(_log_find, params.intent, results)
     out = {"intent": params.intent, "recommendations": results}
     if judged:
         out["soft_filter"] = judged
@@ -646,7 +674,7 @@ async def librarian_brainstorm(params: BrainstormInput) -> str:
     relevant set, so unexpected skills get a chance to spark ideas. For each
     candidate, consider both why it fits and why it might not.
     """
-    results = retrieve(params.context, params.k, MMR_LAMBDA_BRAINSTORM, wildcards=2)
+    results = await asyncio.to_thread(retrieve, params.context, params.k, MMR_LAMBDA_BRAINSTORM, wildcards=2)
     return json.dumps({
         "context": params.context,
         "candidates": results,
@@ -665,6 +693,9 @@ async def librarian_report(params: ReportInput) -> str:
     kill/keep digest in librarian_stats. Agents can only report outcomes —
     they cannot modify skills or rankings directly.
     """
+    return await asyncio.to_thread(_report, params)
+
+def _report(params: ReportInput) -> str:
     conn = db()
     exists = conn.execute("SELECT 1 FROM skills WHERE name=?", (params.skill,)).fetchone()
     conn.execute(
@@ -687,7 +718,7 @@ async def librarian_reindex(force: bool = False) -> str:
     Run after adding or editing skills. Only changed files are re-embedded
     (content-hash check), so repeated runs are cheap.
     """
-    stats = reindex_collection(force=force)
+    stats = await asyncio.to_thread(reindex_collection, force=force)
     return json.dumps({"skills_dir": str(SKILLS_DIR), **stats}, indent=2)
 
 @mcp.tool(
@@ -702,6 +733,9 @@ async def librarian_stats() -> str:
     plus the 100 oldest never-recommended ones for the weekly review), and
     skills with poor success rates (rewrite candidates).
     """
+    return await asyncio.to_thread(_stats)
+
+def _stats() -> str:
     conn = db()
     all_skills = [r[0] for r in conn.execute("SELECT name FROM skills").fetchall()]
     appearance: dict = {}

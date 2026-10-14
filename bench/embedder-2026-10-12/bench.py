@@ -1,7 +1,8 @@
 import json, sqlite3, struct, sys, time, math, httpx
 import numpy as np
-DB = "/Users/kika_hub/.skill_librarian/librarian.db"
-TS = "/Users/kika_hub/_KIKA_MAIN/_INFRA/mcp/servers/the_librarian/bench/decision-filter-2026-10-09/testset.json"
+from pathlib import Path
+DB = Path("~/.skill_librarian/librarian.db").expanduser()
+TS = Path(__file__).resolve().parent.parent / "decision-filter-2026-10-09" / "testset.json"
 NEW = "embeddinggemma-2:740m-mxfp8"
 conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 rows = conn.execute("SELECT s.name, s.description, s.body, e.dim, e.vec FROM skills s JOIN embeddings e ON e.skill_id=s.id").fetchall()

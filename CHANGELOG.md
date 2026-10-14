@@ -2,6 +2,32 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-14 (safety fixes from a code review)
+
+### Fixed — a reindex can no longer wipe the index
+The 2026-06-17 wipe could happen again: a missing, unmounted or wrong
+`LIBRARIAN_SKILLS_DIR` pruned every skill. `reindex_collection()` now scans
+first and refuses, changing nothing, when the folder is missing, holds no
+skills, or holds under half of what is indexed. `librarian_reindex(force=true)`
+allows a big drop on purpose. Connections close in `try/finally`, and SQLite
+waits 10 s on a lock instead of failing at once.
+
+### Fixed — parsing and embedding
+The closing frontmatter fence must be its own line (an inline `---` cut the
+frontmatter short). A description that starts on the `description:` line and
+wraps onto indented lines keeps them: six skills (the seo-* family,
+ui-ux-designer) had been indexed with only their first line. The embed model is
+part of the content hash, so a model change re-embeds everything; vectors of a
+different length score 0. `embed()` turns timeouts and empty answers into the
+same actionable error. Body-fallback descriptions cap at 500 characters.
+`librarian_stats` no longer promises gap queries it never returned.
+
+Checked on a copy of the live index before shipping: 782 skills kept, none gone
+or moved, five searches ranked exactly as before. Live index backed up to
+`_INFRA/backups/librarian-db-2026-10-14/` and reindexed once (all 782
+re-embedded, one time, because of the new hash). Not touched: soft filter, pick,
+dedupe order, MMR, brainstorm.
+
 ## 2026-10-13 (soft filter on nimble-v3, trial until FMD 2026-10-16)
 
 ### Changed — soft filter can use a decision-API model, with a fallback

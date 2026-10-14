@@ -10,7 +10,7 @@ Tools:
   librarian_brainstorm — wider, looser sweep with wildcards for ideation
   librarian_report    — agents report back whether a skill worked (append-only)
   librarian_reindex   — rescan + re-embed changed SKILL.md files
-  librarian_stats     — usage digest: hot skills, dead skills, gap queries
+  librarian_stats     — usage digest: hot skills, dead skills, rewrite candidates
 
 Config (env):
   LIBRARIAN_SKILLS_DIR   default: ~/.claude/skills
@@ -25,6 +25,7 @@ import json
 import math
 import os
 import random
+import re
 import sqlite3
 import struct
 import subprocess
@@ -104,7 +105,7 @@ mcp = MCPServer("skill_librarian_mcp", middleware=[_count_tool_calls])
 
 def db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")  # without this, ON DELETE CASCADE never fires
     conn.executescript("""
@@ -159,8 +160,14 @@ def embed(text: str) -> List[float]:
             timeout=30.0,
         )
         r.raise_for_status()
-        return r.json()["embeddings"][0]
-    except httpx.ConnectError as e:
+        embeddings = r.json().get("embeddings")
+        if not embeddings or not embeddings[0]:
+            raise RuntimeError(
+                f"Ollama rejected the embed request (empty embeddings). "
+                f"Pull the model first: `ollama pull {EMBED_MODEL}`"
+            )
+        return embeddings[0]
+    except httpx.RequestError as e:
         raise RuntimeError(
             f"Cannot reach Ollama at {OLLAMA_HOST}. Is it running? "
             f"Set OLLAMA_HOST to a reachable node (e.g. a Tailscale IP). ({e})"
@@ -172,6 +179,8 @@ def embed(text: str) -> List[float]:
         )
 
 def cosine(a: List[float], b: List[float]) -> float:
+    if len(a) != len(b):
+        return 0.0
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))
@@ -188,10 +197,10 @@ def parse_skill(path: Path) -> Optional[dict]:
     name, desc = path.parent.name, ""
     body_start = 0
     if text.startswith("---"):
-        end = text.find("---", 3)
-        if end != -1:
-            body_start = end + 3
-            lines = text[3:end].splitlines()
+        m = re.search(r"^---[ \t\r]*$", text[3:], re.M)
+        if m:
+            body_start = 3 + m.end()
+            lines = text[3 : 3 + m.start()].splitlines()
             i = 0
             while i < len(lines):
                 line = lines[i]
@@ -206,6 +215,11 @@ def parse_skill(path: Path) -> Optional[dict]:
                                 i += 1
                                 block.append(lines[i].strip())
                             val = " ".join(b for b in block if b)
+                        else:
+                            while i + 1 < len(lines) and lines[i + 1][:1] in (" ", "\t"):
+                                i += 1
+                                if lines[i].strip():
+                                    val += " " + lines[i].strip()
                         val = val.strip("\"'")
                         if key == "name" and val:
                             name = val
@@ -218,7 +232,7 @@ def parse_skill(path: Path) -> Optional[dict]:
         for line in text[body_start:].splitlines():
             s = line.strip().lstrip(">").strip()
             if s and not s.startswith(("#", "---", "```")):
-                desc = s
+                desc = s[:500]
                 break
     return {"name": name, "path": str(path), "description": desc, "body": text}
 
@@ -251,10 +265,11 @@ def iter_skill_files() -> List[Path]:
 
     return sorted(files, key=rank)
 
-def reindex_collection() -> dict:
+def reindex_collection(force: bool = False) -> dict:
     """Scan SKILLS_DIR for SKILL.md files; embed new/changed; prune deleted."""
-    conn = db()
-    found, added, updated = [], 0, 0
+    if not SKILLS_DIR.is_dir():
+        return {"error": f"Skills folder missing or not a directory: {SKILLS_DIR}"}
+    skills, found = [], []
     for path in iter_skill_files():
         s = parse_skill(path)
         if not s:
@@ -262,49 +277,62 @@ def reindex_collection() -> dict:
         if s["name"] in found:
             continue  # duplicate skill name at another path — first wins, avoids re-embed flip-flop
         found.append(s["name"])
-        # hash the full searchable surface, not just the body — name/description
-        # changes (or parser fixes) must trigger a re-embed too
-        h = hashlib.sha256(f"{s['name']}\n{s['description']}\n{s['body']}".encode()).hexdigest()
-        row = conn.execute(
-            "SELECT id, body_hash FROM skills WHERE name=?", (s["name"],)
-        ).fetchone()
-        if row and row[1] == h:
-            # same content, but the winning copy's location may have changed
-            conn.execute("UPDATE skills SET path=? WHERE id=? AND path<>?", (s["path"], row[0], s["path"]))
-            continue
-        # embed name + description + first 4k of body — the searchable surface
-        vec = embed(f"{s['name']}\n{s['description']}\n{s['body'][:4000]}")
-        if row:
-            conn.execute(
-                "UPDATE skills SET path=?, description=?, body=?, body_hash=?, indexed_at=? WHERE id=?",
-                (s["path"], s["description"], s["body"], h, time.time(), row[0]),
-            )
-            conn.execute(
-                "UPDATE embeddings SET dim=?, vec=? WHERE skill_id=?",
-                (len(vec), pack(vec), row[0]),
-            )
-            updated += 1
-        else:
-            cur = conn.execute(
-                "INSERT INTO skills(name, path, description, body, body_hash, indexed_at) VALUES (?,?,?,?,?,?)",
-                (s["name"], s["path"], s["description"], s["body"], h, time.time()),
-            )
-            conn.execute(
-                "INSERT INTO embeddings(skill_id, dim, vec) VALUES (?,?,?)",
-                (cur.lastrowid, len(vec), pack(vec)),
-            )
-            added += 1
-        if (added + updated) % 50 == 0:
-            conn.commit()  # don't lose a whole run to one bad embed
-    # prune skills whose files vanished
-    pruned = 0
-    for (sid, name) in conn.execute("SELECT id, name FROM skills").fetchall():
-        if name not in found:
-            conn.execute("DELETE FROM skills WHERE id=?", (sid,))
-            pruned += 1
-    conn.commit()
-    conn.close()
-    return {"indexed": len(found), "added": added, "updated": updated, "pruned": pruned}
+        skills.append(s)
+    if not skills:
+        return {"error": f"Found 0 skills in {SKILLS_DIR}; refusing to prune index."}
+    conn = db()
+    try:
+        existing = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
+        if not force and len(skills) < existing / 2:
+            return {
+                "error": f"Found {len(skills)} skills vs {existing} indexed (<50%); refusing to prune (pass force=True to allow)."
+            }
+        added, updated = 0, 0
+        for s in skills:
+            # hash the full searchable surface, not just the body — name/description
+            # changes (or parser fixes) must trigger a re-embed too
+            h = hashlib.sha256(f"{EMBED_MODEL}\n{s['name']}\n{s['description']}\n{s['body']}".encode()).hexdigest()
+            row = conn.execute(
+                "SELECT id, body_hash FROM skills WHERE name=?", (s["name"],)
+            ).fetchone()
+            if row and row[1] == h:
+                # same content, but the winning copy's location may have changed
+                conn.execute("UPDATE skills SET path=? WHERE id=? AND path<>?", (s["path"], row[0], s["path"]))
+                continue
+            # embed name + description + first 4k of body — the searchable surface
+            vec = embed(f"{s['name']}\n{s['description']}\n{s['body'][:4000]}")
+            if row:
+                conn.execute(
+                    "UPDATE skills SET path=?, description=?, body=?, body_hash=?, indexed_at=? WHERE id=?",
+                    (s["path"], s["description"], s["body"], h, time.time(), row[0]),
+                )
+                conn.execute(
+                    "UPDATE embeddings SET dim=?, vec=? WHERE skill_id=?",
+                    (len(vec), pack(vec), row[0]),
+                )
+                updated += 1
+            else:
+                cur = conn.execute(
+                    "INSERT INTO skills(name, path, description, body, body_hash, indexed_at) VALUES (?,?,?,?,?,?)",
+                    (s["name"], s["path"], s["description"], s["body"], h, time.time()),
+                )
+                conn.execute(
+                    "INSERT INTO embeddings(skill_id, dim, vec) VALUES (?,?,?)",
+                    (cur.lastrowid, len(vec), pack(vec)),
+                )
+                added += 1
+            if (added + updated) % 50 == 0:
+                conn.commit()  # don't lose a whole run to one bad embed
+        # prune skills whose files vanished
+        pruned = 0
+        for (sid, name) in conn.execute("SELECT id, name FROM skills").fetchall():
+            if name not in found:
+                conn.execute("DELETE FROM skills WHERE id=?", (sid,))
+                pruned += 1
+        conn.commit()
+        return {"indexed": len(found), "added": added, "updated": updated, "pruned": pruned}
+    finally:
+        conn.close()
 
 # ---------------------------------------------------------------- retrieval
 
@@ -343,39 +371,40 @@ def mmr_select(query_vec, candidates, k, lam, recent_counts):
 
 def retrieve(query: str, k: int, lam: float, wildcards: int = 0, log: bool = True) -> List[dict]:
     conn = db()
-    rows = conn.execute(
-        "SELECT s.name, s.description, e.dim, e.vec FROM skills s JOIN embeddings e ON e.skill_id=s.id"
-    ).fetchall()
-    if not rows:
+    try:
+        rows = conn.execute(
+            "SELECT s.name, s.description, e.dim, e.vec FROM skills s JOIN embeddings e ON e.skill_id=s.id"
+        ).fetchall()
+        if not rows:
+            raise RuntimeError(
+                f"Index is empty. Run librarian_reindex first (skills dir: {SKILLS_DIR})."
+            )
+        qv = embed(query)
+        cands = [(n, d, unpack(v, dim), cosine(qv, unpack(v, dim))) for n, d, dim, v in rows]
+        cands.sort(key=lambda c: c[3], reverse=True)
+        recent = recent_appearance_counts(conn)
+        picked = mmr_select(qv, cands[: max(k * 4, 16)], k, lam, recent)
+
+        if wildcards:
+            chosen = {c[0] for c in picked}
+            leftovers = [c for c in cands if c[0] not in chosen]
+            picked += random.sample(leftovers, min(wildcards, len(leftovers)))
+
+        results = []
+        for name, desc, _vec, sim in picked:
+            stats = outcome_stats(conn, name)
+            results.append({
+                "skill": name,
+                "description": desc,
+                "similarity": round(sim, 3),
+                "recently_recommended": recent.get(name, 0),
+                **stats,
+            })
+        if log:
+            log_query(conn, "brainstorm" if wildcards else "find", query, results)
+        return results
+    finally:
         conn.close()
-        raise RuntimeError(
-            f"Index is empty. Run librarian_reindex first (skills dir: {SKILLS_DIR})."
-        )
-    qv = embed(query)
-    cands = [(n, d, unpack(v, dim), cosine(qv, unpack(v, dim))) for n, d, dim, v in rows]
-    cands.sort(key=lambda c: c[3], reverse=True)
-    recent = recent_appearance_counts(conn)
-    picked = mmr_select(qv, cands[: max(k * 4, 16)], k, lam, recent)
-
-    if wildcards:
-        chosen = {c[0] for c in picked}
-        leftovers = [c for c in cands if c[0] not in chosen]
-        picked += random.sample(leftovers, min(wildcards, len(leftovers)))
-
-    results = []
-    for name, desc, _vec, sim in picked:
-        stats = outcome_stats(conn, name)
-        results.append({
-            "skill": name,
-            "description": desc,
-            "similarity": round(sim, 3),
-            "recently_recommended": recent.get(name, 0),
-            **stats,
-        })
-    if log:
-        log_query(conn, "brainstorm" if wildcards else "find", query, results)
-    conn.close()
-    return results
 
 def log_query(conn, mode: str, query: str, results: List[dict]) -> None:
     conn.execute(
@@ -487,6 +516,7 @@ async def _judge_all(model: str, intent: str, judged: List[dict], timeout_s: flo
             done, pending = await asyncio.wait(tasks, timeout=timeout_s)
             for t in pending:
                 t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
             for i, t in enumerate(tasks):
                 if t in done and not t.cancelled() and t.exception() is None:
                     out[i] = t.result()
@@ -651,13 +681,13 @@ async def librarian_report(params: ReportInput) -> str:
     annotations={"title": "Reindex Skill Collection", "readOnlyHint": False,
                  "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
-async def librarian_reindex() -> str:
+async def librarian_reindex(force: bool = False) -> str:
     """Rescan the skills directory, embed new/changed SKILL.md files, prune deleted ones.
 
     Run after adding or editing skills. Only changed files are re-embedded
     (content-hash check), so repeated runs are cheap.
     """
-    stats = reindex_collection()
+    stats = reindex_collection(force=force)
     return json.dumps({"skills_dir": str(SKILLS_DIR), **stats}, indent=2)
 
 @mcp.tool(
@@ -669,14 +699,13 @@ async def librarian_stats() -> str:
     """Digest of collection health for curation decisions.
 
     Shows: most-recommended skills, never-surfaced skills (kill candidates,
-    plus the 100 oldest never-recommended ones for the weekly review),
-    skills with poor success rates (rewrite candidates), and recent queries
-    that matched nothing well (gaps — skills you should build).
+    plus the 100 oldest never-recommended ones for the weekly review), and
+    skills with poor success rates (rewrite candidates).
     """
     conn = db()
     all_skills = [r[0] for r in conn.execute("SELECT name FROM skills").fetchall()]
     appearance: dict = {}
-    for (q, returned) in conn.execute("SELECT query, returned FROM query_log ORDER BY id DESC LIMIT 200"):
+    for (returned,) in conn.execute("SELECT returned FROM query_log ORDER BY id DESC LIMIT 200"):
         names = json.loads(returned)
         for n in names:
             appearance[n] = appearance.get(n, 0) + 1

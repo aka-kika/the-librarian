@@ -112,11 +112,12 @@ Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embeddi
 
 | Tool | What it does |
 |---|---|
-| `librarian_find` | Ranked shortlist for an intent — varied picks, no repeats from recent queries, success rates shown. |
+| `librarian_find` | Ranked shortlist for an intent — varied picks, no repeats from recent queries (the closest match is never held back), success rates shown, and a plain `suggest` line: one skill when the judge is sure, else "No skill fits, carry on". |
+| `librarian_get` | Hands over one skill in full (SKILL.md plus its other file names), so an agent can read a skill it does not have without copying it. Each fetch is logged. |
 | `librarian_brainstorm` | Wide diverse sweep: k candidates, the last 2 random wildcards. For ideation, not convergence. |
 | `librarian_report` | Agent reports skill worked/failed. Append-only — agents can't touch rankings. |
-| `librarian_reindex` | Rescan + re-embed changed SKILL.md files (hash-checked, cheap to rerun). |
-| `librarian_stats` | Curation digest: hot skills, never-surfaced (kill candidates), low success rate (rewrite candidates). |
+| `librarian_reindex` | Rescan + re-embed changed SKILL.md files (hash-checked, cheap to rerun). Also mirrors the pre-archive room (`LIBRARIAN_ROOM_DIR`) into its own table, never handed out. |
+| `librarian_stats` | Curation digest: hot skills, never-surfaced (kill candidates), low success rate (rewrite candidates), skills on trial after a fetch, and searches where no skill fit (with the room skills they came close to). |
 
 ## Teaching your agents to use it
 

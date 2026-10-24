@@ -2,6 +2,26 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-24 (skills loop, step 5 of 6: tested with Claude and Grok)
+
+No code change. Fresh headless runs on Kika's main Mac, each starting its own
+librarian with the new code, on one read-only task: review a 15-line
+SettingsView.swift (an @AppStorage launch-at-login toggle with `try?`) and
+list fixes. Tools limited to reading; the file was unchanged after.
+
+- **Grok** (`grok -p`, 1.0.70, permission mode dontAsk, only the librarian
+  allowed): ran the whole loop unasked. find suggested macos-launch-at-login,
+  get handed it over, report said worked. Client `grok-shell-skill-librarian`.
+- **Claude Code** (`claude -p`, Sonnet): did not use the librarian on its own,
+  neither for a quick question nor for the review, though it quotes the server
+  instructions word for word when asked. Claude Code defers MCP tools behind
+  ToolSearch, so the tools are not in view until searched. Asked outright, it
+  ran the loop the same way (client `claude-code`). Open: what makes Claude
+  notice by itself.
+- `librarian_stats` after: macos-launch-at-login on trial, 2 fetches, 2 of 2
+  worked, "too few reports yet"; 2 searches, no misses, the one-more-week
+  note. The client "mcp" rows from steps 3-4 are left out as planned.
+
 ## 2026-10-24 (skills loop, step 4 of 6: on trial, no fit, the room)
 
 ### Added — the pre-archive room in the index, never handed out

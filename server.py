@@ -44,6 +44,15 @@ SKILLS_DIR = Path(os.environ.get("LIBRARIAN_SKILLS_DIR", "~/.claude/skills")).ex
 # top-level prefixes win the dedupe race (comma-separated, in order)
 CANONICAL_PREFIXES = [p.strip() for p in os.environ.get("LIBRARIAN_CANONICAL_PREFIXES", "").split(",") if p.strip()]
 DB_PATH = Path(os.environ.get("LIBRARIAN_DB", "~/.skill_librarian/librarian.db")).expanduser()
+# The pre-archive room: skills on a trial week out of the collection. Indexed
+# into their own table, so find, brainstorm and get never hand them out; a
+# search with no fit is matched against them, so a missed one can come back.
+ROOM_DIR = Path(os.environ.get("LIBRARIAN_ROOM_DIR") or SKILLS_DIR.parent / "Skills-pre-archive").expanduser()
+ROOM_MATCH_AT = 0.6          # a no-fit search names a room skill from this similarity
+TRIAL_DAYS = 14              # stats: fetched skills judged over this many days
+NO_FIT_DAYS = 7              # stats: no-fit searches looked at over this many days
+FEW_SEARCHES = 20            # fewer searches than this in NO_FIT_DAYS: give the room a week more
+TEST_CLIENTS = ("mcp",)      # smoke tests connect as the Python SDK's default client name
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 EMBED_MODEL = os.environ.get("LIBRARIAN_EMBED_MODEL", "nomic-embed-text")
 
@@ -165,6 +174,25 @@ def db() -> sqlite3.Connection:
         ts REAL NOT NULL,
         skill_name TEXT NOT NULL,
         client TEXT                     -- the agent that fetched it
+      );
+      CREATE TABLE IF NOT EXISTS suggest_log (  -- append-only: one row per find
+        id INTEGER PRIMARY KEY,
+        ts REAL NOT NULL,
+        intent TEXT NOT NULL,
+        client TEXT,
+        suggested TEXT,                 -- the skill named, NULL for "no skill fits"
+        room_match TEXT,                -- closest room skill when nothing fit
+        room_sim REAL
+      );
+      CREATE TABLE IF NOT EXISTS room_skills (  -- index of ROOM_DIR, never handed out
+        id INTEGER PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        path TEXT NOT NULL,
+        description TEXT NOT NULL,
+        body_hash TEXT NOT NULL,
+        dim INTEGER NOT NULL,
+        vec BLOB NOT NULL,
+        indexed_at REAL NOT NULL
       );
     """)
     return conn
@@ -367,9 +395,53 @@ def reindex_collection(force: bool = False) -> dict:
                 conn.execute("DELETE FROM skills WHERE id=?", (sid,))
                 pruned += 1
         conn.commit()
-        return {"indexed": len(found), "added": added, "updated": updated, "pruned": pruned}
+        return {"indexed": len(found), "added": added, "updated": updated, "pruned": pruned,
+                "room": reindex_room(conn)}
     finally:
         conn.close()
+
+def reindex_room(conn: sqlite3.Connection) -> dict:
+    """Mirror ROOM_DIR into room_skills: embed new/changed, drop what left the room.
+    A missing room is not an error: it just means no skill is on trial out."""
+    skills, found = [], set()
+    if ROOM_DIR.is_dir():
+        for root, _dirs, names in os.walk(ROOM_DIR):
+            if "SKILL.md" in names:
+                s = parse_skill(Path(root) / "SKILL.md")
+                if s and s["name"] not in found:
+                    found.add(s["name"])
+                    skills.append(s)
+    added = 0
+    for s in skills:
+        h = hashlib.sha256(f"{EMBED_MODEL}\n{s['name']}\n{s['description']}\n{s['body']}".encode()).hexdigest()
+        row = conn.execute("SELECT body_hash FROM room_skills WHERE name=?", (s["name"],)).fetchone()
+        if row and row[0] == h:
+            continue
+        vec = embed(f"{s['name']}\n{s['description']}\n{s['body'][:4000]}")  # same surface as the collection
+        conn.execute("DELETE FROM room_skills WHERE name=?", (s["name"],))
+        conn.execute(
+            "INSERT INTO room_skills(name, path, description, body_hash, dim, vec, indexed_at) VALUES (?,?,?,?,?,?,?)",
+            (s["name"], s["path"], s["description"], h, len(vec), pack(vec), time.time()))
+        added += 1
+    left = 0
+    for (name,) in conn.execute("SELECT name FROM room_skills").fetchall():
+        if name not in found:
+            conn.execute("DELETE FROM room_skills WHERE name=?", (name,))
+            left += 1
+    conn.commit()
+    return {"dir": str(ROOM_DIR), "in_room": len(found), "added": added, "left": left}
+
+def closest_room_skill(intent: str) -> Optional[tuple]:
+    """(name, similarity) of the room skill nearest the intent, or None."""
+    conn = db()
+    try:
+        rows = conn.execute("SELECT name, dim, vec FROM room_skills").fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return None
+    qv = embed(intent)
+    return max(((n, cosine(qv, unpack(v, d))) for n, d, v in rows), key=lambda x: x[1])
 
 # ---------------------------------------------------------------- retrieval
 
@@ -695,12 +767,31 @@ async def librarian_find(params: FindInput) -> str:
             out["hint"] = 'Skills with match "likely" come first; "weak match" ones a local model doubted, still worth a glance.'
     if pick and pick in {r["skill"] for r in results}:
         out["pick"] = pick
-    out["suggest"] = _suggestion(results, judged, out.get("pick"))
+    out["suggest"], named = _suggestion(results, judged, out.get("pick"))
+    await asyncio.to_thread(_log_suggestion, params.intent, named)
     return json.dumps(out, indent=2)
 
-def _suggestion(results: List[dict], judged: Optional[dict], pick: Optional[str]) -> str:
-    """One plain line the agent can pass on: a skill only when the judge is
-    sure enough, otherwise "carry on" so a weak list makes no noise."""
+def _log_suggestion(intent: str, named: Optional[str]) -> None:
+    """One suggest_log row per find. When nothing fit, also the closest room
+    skill: the room's trial week is judged on these. Never breaks a find."""
+    try:
+        room = None if named else closest_room_skill(intent)
+        conn = db()
+        try:
+            conn.execute(
+                "INSERT INTO suggest_log(ts, intent, client, suggested, room_match, room_sim) VALUES (?,?,?,?,?,?)",
+                (time.time(), intent, _CLIENT, named, room[0] if room else None,
+                 round(room[1], 3) if room else None))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+def _suggestion(results: List[dict], judged: Optional[dict], pick: Optional[str]) -> tuple:
+    """(line, skill): one plain line the agent can pass on, naming a skill only
+    when the judge is sure enough, otherwise "carry on" so a weak list makes no
+    noise; skill is None then."""
     if judged and judged.get("status") == "ok":
         sure = [r for r in results if r.get("match") == "likely"
                 and r.get("fit_prob", 1.0) >= SUGGEST_AT]  # yes/no judges give no prob
@@ -710,9 +801,9 @@ def _suggestion(results: List[dict], judged: Optional[dict], pick: Optional[str]
         # judge off or down: fall back to the reranker's own fit score
         best = next((r for r in results if r["skill"] == pick and (r.get("fit") or 0) >= 8), None)
     if not best:
-        return "No skill fits, carry on."
+        return "No skill fits, carry on.", None
     why = f" Why: {best['why']}" if best.get("why") else ""
-    return f"Skill that fits: {best['skill']}.{why}"
+    return f"Skill that fits: {best['skill']}.{why}", best["skill"]
 
 @mcp.tool(
     name="librarian_brainstorm",
@@ -753,6 +844,9 @@ def _get(params: GetInput) -> str:
     conn = db()
     try:
         row = conn.execute("SELECT name, path, body FROM skills WHERE name=?", (params.skill,)).fetchone()
+        if not row and conn.execute("SELECT 1 FROM room_skills WHERE name=?", (params.skill,)).fetchone():
+            return json.dumps({"error": f"'{params.skill}' is in the pre-archive room (a trial week out "
+                                        "of the collection): not handed out. Do the task without it."})
         if not row:
             like = [n for (n,) in conn.execute(
                 "SELECT name FROM skills WHERE name LIKE ? ORDER BY length(name) LIMIT 5",
@@ -879,6 +973,7 @@ def _stats() -> str:
         oldest.append((when, name, path))
     oldest.sort()
     hot = sorted(appearance.items(), key=lambda kv: -kv[1])[:10]
+    on_trial, no_fit = _on_trial(conn), _no_fit(conn)
     conn.close()
     # Digest, not a dump: with a young query_log most of the collection has
     # never surfaced — listing all ~3k names blows past tool-response limits.
@@ -898,7 +993,68 @@ def _stats() -> str:
             for m, n, p in oldest[:100]
         ],
         "low_success_rate (rewrite candidates)": failing,
+        "on_trial (fetched with librarian_get)": on_trial,
+        "no_skill_fit (the room's trial)": no_fit,
     }, indent=2)
+
+# A failed report whose note says the skill was offered for the wrong job is
+# a search problem, not a bad skill: it never counts against the skill.
+WRONG_JOB = re.compile(r"wrong (skill|job|fit)|rejected|unrelated|not a fit|doesn'?t (fit|match)|wrong shape", re.I)
+
+def _not_test(column: str = "client") -> str:
+    return f"COALESCE({column},'') NOT IN ({','.join('?' * len(TEST_CLIENTS))})"
+
+def _on_trial(conn: sqlite3.Connection) -> list:
+    """Skills fetched in the last TRIAL_DAYS, judged on the reports since their
+    first fetch. Only flags for Kika; nothing is moved."""
+    since = time.time() - TRIAL_DAYS * 86400
+    out = []
+    for name, fetches, first in conn.execute(
+            f"SELECT skill_name, COUNT(*), MIN(ts) FROM fetch_log WHERE ts>=? AND {_not_test()} "
+            "GROUP BY skill_name ORDER BY COUNT(*) DESC", (since, *TEST_CLIENTS)).fetchall():
+        reports = conn.execute("SELECT worked, note FROM outcome_log WHERE skill_name=? AND ts>=?",
+                               (name, first)).fetchall()
+        wrong = sum(1 for w, n in reports if not w and n and WRONG_JOB.search(n))
+        real = len(reports) - wrong
+        worked = sum(w for w, _ in reports)
+        if wrong >= 2:
+            verdict = "flag: offered for the wrong job, sharpen its description"
+        elif real < 3:
+            verdict = "too few reports yet"
+        elif worked < real * 2 / 3:
+            verdict = f"flag for Kika: {worked} of {real} worked"
+        else:
+            verdict = f"fine: {worked} of {real} worked"
+        out.append({"skill": name, "fetches": fetches, "reports": len(reports),
+                    "worked": worked, "wrong_job": wrong, "verdict": verdict})
+    return out
+
+def _no_fit(conn: sqlite3.Connection) -> dict:
+    """Searches in the last NO_FIT_DAYS where no skill fit, and the room skills
+    they came close to: the comeback candidates for the room's trial week."""
+    since = time.time() - NO_FIT_DAYS * 86400
+    rows = conn.execute(
+        f"SELECT intent, suggested, room_match, room_sim FROM suggest_log WHERE ts>=? AND {_not_test()} ORDER BY id",
+        (since, *TEST_CLIENTS)).fetchall()
+    misses = [r for r in rows if r[1] is None]
+    near: dict = {}
+    for intent, _s, match, sim in misses:
+        if match and sim is not None and sim >= ROOM_MATCH_AT:
+            near.setdefault(match, []).append((sim, intent))
+    out = {
+        "searches": len(rows),
+        "no_fit": len(misses),
+        "skills_in_room": conn.execute("SELECT COUNT(*) FROM room_skills").fetchone()[0],
+        "room_skills_matched (comeback candidates)": [
+            {"skill": n, "searches": len(v), "best_similarity": max(v)[0],
+             "examples": [i[:120] for _, i in sorted(v, reverse=True)[:3]]}
+            for n, v in sorted(near.items(), key=lambda kv: -len(kv[1]))],
+        "no_fit_examples": [r[0][:120] for r in misses[-5:]],
+    }
+    if len(rows) < FEW_SEARCHES:
+        out["note"] = (f"Only {len(rows)} searches in {NO_FIT_DAYS} days: "
+                       "too few to judge the room, give it one more week.")
+    return out
 
 def _rel_to_collection(path: str) -> str:
     folder = Path(path).resolve().parent

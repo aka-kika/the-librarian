@@ -2,6 +2,39 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-24 (skills loop, step 4 of 6: on trial, no fit, the room)
+
+### Added — the pre-archive room in the index, never handed out
+`ROOM_DIR` (`LIBRARIAN_ROOM_DIR`, default `Skills-pre-archive` beside the
+collection) is mirrored by every reindex into its own `room_skills` table (same
+embed surface as the collection). find, brainstorm and get read only `skills`,
+so a room skill can never be handed out; `librarian_get` on one says it is in
+the room. The reindex result gains a `room` part (36 skills on 2026-10-24).
+
+### Added — `suggest_log`, one append-only row per find
+Intent, client, the skill the suggest line named (NULL for "no skill fits")
+and, when nothing fit, the closest room skill with its similarity (one extra
+embed, only then). Logging never breaks a find. `_suggestion` now also returns
+the named skill, so nothing parses the line back.
+
+### Added — two parts in `librarian_stats`
+- `on_trial`: skills fetched with `librarian_get` in the last 14 days, judged on
+  reports since their first fetch. A failed report whose note says wrong job
+  (`WRONG_JOB`) never counts against the skill; 2 of those flag "sharpen its
+  description". Under 3 real reports: too few. Fewer than 2 in 3 worked: flag
+  for Kika. It only flags; nothing moves.
+- `no_skill_fit`: the last 7 days of finds, how many found nothing, and room
+  skills those came within 0.6 of (comeback candidates, with examples). Under
+  20 searches it says to give the room one more week.
+Both skip `TEST_CLIENTS` ("mcp", the Python SDK's default client name).
+
+Tested on a copy of the database as client "smoke-test": the room indexed (36),
+get refused design-glassmorphism, "doodle hand-drawn UI style" found nothing
+and named design-doodle from the room at 0.746 (sourdough: design-cafe at 0.42,
+left out), made-up reports gave fine / flag / wrong-job / too few as expected.
+Then one fresh-server reindex on the real database filled `room_skills`; no
+log row was added or changed.
+
 ## 2026-10-24 (skills loop, step 3 of 6: fetch)
 
 ### Added — `librarian_get(skill)` and the fetch log

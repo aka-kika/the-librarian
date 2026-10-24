@@ -58,6 +58,10 @@ RERANK_TIMEOUT = 30.0        # seconds; on timeout/error find falls back to embe
 SOFT_FILTER_CONFIG = Path(os.environ.get(
     "LIBRARIAN_SOFT_FILTER_CONFIG", "~/.skill_librarian/soft_filter.json")).expanduser()
 SOFT_FILTER_LOG = DB_PATH.parent / "soft_filter.jsonl"
+# find's "suggest" line names one skill only above this judge probability.
+# "likely" starts at 0.3, too loose to put in front of Kika: on 2026-10-24 a
+# cleanup intent got preparing-repo-for-public-release as likely at 0.64.
+SUGGEST_AT = 0.7
 
 RECENCY_WINDOW = 10          # last N queries considered for the repeat penalty
 RECENCY_PENALTY = 0.15       # score subtracted per recent appearance
@@ -103,7 +107,7 @@ INSTRUCTIONS = """\
 The skill librarian recommends skills from Kika's collection: step-by-step know-how for a job.
 - If your agent already has a skill for the job (Claude Code loads Kika's own skills, like wrap or goodnight), use that one. Ask the librarian only for what you do not have.
 - Before a real task (not a small edit or a quick question), call librarian_find with what you are about to do, in plain words.
-- Use a recommendation only when it truly fits: read its why_not. Tell the user in one line which skill you use and why.
+- Its "suggest" line names a skill only when one truly fits; "No skill fits, carry on" means do the task without one. Tell the user in one line which skill you use and why.
 - After using one, call librarian_report(skill, worked, note). If it was offered for the wrong job, report worked=false and say so in the note.
 - Agents read recommendations and write only outcomes: never edit skills or the librarian's data."""
 
@@ -670,7 +674,24 @@ async def librarian_find(params: FindInput) -> str:
             out["hint"] = 'Skills with match "likely" come first; "weak match" ones a local model doubted, still worth a glance.'
     if pick and pick in {r["skill"] for r in results}:
         out["pick"] = pick
+    out["suggest"] = _suggestion(results, judged, out.get("pick"))
     return json.dumps(out, indent=2)
+
+def _suggestion(results: List[dict], judged: Optional[dict], pick: Optional[str]) -> str:
+    """One plain line the agent can pass on: a skill only when the judge is
+    sure enough, otherwise "carry on" so a weak list makes no noise."""
+    if judged and judged.get("status") == "ok":
+        sure = [r for r in results if r.get("match") == "likely"
+                and r.get("fit_prob", 1.0) >= SUGGEST_AT]  # yes/no judges give no prob
+        sure.sort(key=lambda r: r["skill"] != pick)  # the reranker's pick first, if sure
+        best = sure[0] if sure else None
+    else:
+        # judge off or down: fall back to the reranker's own fit score
+        best = next((r for r in results if r["skill"] == pick and (r.get("fit") or 0) >= 8), None)
+    if not best:
+        return "No skill fits, carry on."
+    why = f" Why: {best['why']}" if best.get("why") else ""
+    return f"Skill that fits: {best['skill']}.{why}"
 
 @mcp.tool(
     name="librarian_brainstorm",

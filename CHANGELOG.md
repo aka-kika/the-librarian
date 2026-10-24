@@ -2,6 +2,23 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-24 (skills loop, step 2 of 6: suggest)
+
+### Added — find's "suggest" line
+`librarian_find` now ends with one plain line the agent can pass on:
+"Skill that fits: X. Why: ..." or "No skill fits, carry on." A skill is named
+only when the soft filter marks it likely at `SUGGEST_AT` (0.7) or more, the
+reranker's pick first; "likely" itself starts at 0.3, too loose (a cleanup
+intent got preparing-repo-for-public-release as likely at 0.64). With the
+judge off or down, the reranker's pick is named only at fit 8 or more. The
+server instructions now point agents at the line. Smoke test: "wrap up the
+work session" names wrap; "bake sourdough" says carry on.
+
+### Found, not fixed — the repeat penalty can hide the right skill
+Two appearances in the last 10 finds (all agents share them) cost 0.30, so
+project-folder-cleanup (similarity 0.81 for a node_modules cleanup) dropped out
+of its own job's shortlist after two test searches. Waiting on Kika.
+
 ## 2026-10-24 (skills loop, step 1 of 6: notice)
 
 ### Added — server instructions, so every agent notices the librarian

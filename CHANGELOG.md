@@ -14,10 +14,14 @@ judge off or down, the reranker's pick is named only at fit 8 or more. The
 server instructions now point agents at the line. Smoke test: "wrap up the
 work session" names wrap; "bake sourdough" says carry on.
 
-### Found, not fixed — the repeat penalty can hide the right skill
-Two appearances in the last 10 finds (all agents share them) cost 0.30, so
-project-folder-cleanup (similarity 0.81 for a node_modules cleanup) dropped out
-of its own job's shortlist after two test searches. Waiting on Kika.
+### Fixed — the repeat penalty no longer hides the right skill
+The last 10 finds are shared by every agent and the top hits sit within ~0.1
+of each other, so one repeat (0.15) could push the right skill out of its own
+job: project-folder-cleanup (0.81) after two test searches, wrap (0.65) after
+one. Now the closest match of each search skips the penalty (Kika's pick over
+a fixed 0.75 line, which spared too few); it still breaks near-ties below.
+Same 4 smoke intents after: the cleanup job (twice) names
+project-folder-cleanup, the wrap-up job names session, sourdough says carry on.
 
 ## 2026-10-24 (skills loop, step 1 of 6: notice)
 

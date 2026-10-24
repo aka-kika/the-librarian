@@ -65,6 +65,10 @@ SUGGEST_AT = 0.7
 
 RECENCY_WINDOW = 10          # last N queries considered for the repeat penalty
 RECENCY_PENALTY = 0.15       # score subtracted per recent appearance
+# The closest match of each search skips the repeat penalty (Kika, 2026-10-24).
+# The window is shared by every agent and the top hits sit within ~0.1 of each
+# other, so one repeat (0.15) pushed the right skill out of its own job (wrap
+# at 0.65 for "wrap up the session"). The penalty still breaks near-ties below.
 MMR_LAMBDA_FIND = 0.7        # relevance-vs-diversity for find (higher = more relevant)
 MMR_LAMBDA_BRAINSTORM = 0.45 # brainstorm leans diverse
 
@@ -379,10 +383,12 @@ def outcome_stats(conn: sqlite3.Connection, name: str) -> dict:
 def mmr_select(query_vec, candidates, k, lam, recent_counts):
     """Maximal marginal relevance with a recency penalty. candidates: (name, desc, vec, sim)."""
     selected, pool = [], list(candidates)
+    closest = max(pool, key=lambda c: c[3])[0] if pool else None
     while pool and len(selected) < k:
         best, best_score = None, -1e9
         for c in pool:
-            relevance = c[3] - RECENCY_PENALTY * recent_counts.get(c[0], 0)
+            repeats = 0 if c[0] == closest else recent_counts.get(c[0], 0)
+            relevance = c[3] - RECENCY_PENALTY * repeats
             redundancy = max((cosine(c[2], s[2]) for s in selected), default=0.0)
             score = lam * relevance - (1 - lam) * redundancy
             if score > best_score:

@@ -83,14 +83,18 @@ _CALL_LOG = _Path(
     / "skill-librarian-mcp" / "calls.jsonl"
 )
 
+_CLIENT = "unknown"  # one stdio process serves one agent, so the last caller is the caller
+
 async def _count_tool_calls(_ctx, _call_next):
     """mcp 2.x server middleware; counting must never break the server."""
+    global _CLIENT
     if _ctx.method == "tools/call":
         try:
             try:
                 _cp = _ctx.session.client_params
                 _info = getattr(_cp, "client_info", None) or getattr(_cp, "clientInfo")
                 _client, _ver = _info.name, _info.version
+                _CLIENT = _client
             except Exception:
                 _client, _ver = "unknown", None
             _CALL_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -112,6 +116,7 @@ The skill librarian recommends skills from Kika's collection: step-by-step know-
 - If your agent already has a skill for the job (Claude Code loads Kika's own skills, like wrap or goodnight), use that one. Ask the librarian only for what you do not have.
 - Before a real task (not a small edit or a quick question), call librarian_find with what you are about to do, in plain words.
 - Its "suggest" line names a skill only when one truly fits; "No skill fits, carry on" means do the task without one. Tell the user in one line which skill you use and why.
+- To read a skill your agent does not have, call librarian_get(skill): it hands over the whole skill. Never copy skill files into your agent's own folders.
 - After using one, call librarian_report(skill, worked, note). If it was offered for the wrong job, report worked=false and say so in the note.
 - Agents read recommendations and write only outcomes: never edit skills or the librarian's data."""
 
@@ -154,6 +159,12 @@ def db() -> sqlite3.Connection:
         skill_name TEXT NOT NULL,
         worked INTEGER NOT NULL,        -- 1 / 0
         note TEXT
+      );
+      CREATE TABLE IF NOT EXISTS fetch_log (  -- append-only, like the logs above
+        id INTEGER PRIMARY KEY,
+        ts REAL NOT NULL,
+        skill_name TEXT NOT NULL,
+        client TEXT                     -- the agent that fetched it
       );
     """)
     return conn
@@ -644,6 +655,10 @@ class BrainstormInput(BaseModel):
                          description="The situation or problem space to riff on. Looser than an intent — describe the project state.")
     k: int = Field(default=6, ge=3, le=10, description="How many diverse candidates to surface, the 2 random wildcards included.")
 
+class GetInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    skill: str = Field(..., min_length=1, max_length=200, description="Exact skill name as returned by librarian_find.")
+
 class ReportInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     skill: str = Field(..., min_length=1, max_length=200, description="Exact skill name as returned by librarian_find.")
@@ -717,6 +732,62 @@ async def librarian_brainstorm(params: BrainstormInput) -> str:
         "candidates": results,
         "hint": "Last 2 entries are random wildcards. Argue for AND against each candidate before picking.",
     }, indent=2)
+
+GET_MAX_CHARS = 60_000   # one SKILL.md; longer ones point at the file for the rest
+GET_MAX_FILES = 40       # other files listed from the skill's folder
+
+@mcp.tool(
+    name="librarian_get",
+    annotations={"title": "Get a Skill", "readOnlyHint": False,
+                 "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+)
+async def librarian_get(params: GetInput) -> str:
+    """Hand over one skill in full: its SKILL.md and a list of the other files in its folder.
+
+    For a skill librarian_find recommended that your agent does not already
+    have. Each fetch is logged (append-only) so the skill's trial can be judged.
+    """
+    return await asyncio.to_thread(_get, params)
+
+def _get(params: GetInput) -> str:
+    conn = db()
+    try:
+        row = conn.execute("SELECT name, path, body FROM skills WHERE name=?", (params.skill,)).fetchone()
+        if not row:
+            like = [n for (n,) in conn.execute(
+                "SELECT name FROM skills WHERE name LIKE ? ORDER BY length(name) LIMIT 5",
+                (f"%{params.skill}%",))]
+            return json.dumps({"error": f"No skill named '{params.skill}' in the index.",
+                               "did_you_mean": like})
+        name, path, body = row
+        skill_md = Path(path)
+        try:
+            text = skill_md.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = body  # moved since the last reindex: hand over the indexed copy
+        conn.execute("INSERT INTO fetch_log(ts, skill_name, client) VALUES (?,?,?)",
+                     (time.time(), name, _CLIENT))
+        conn.commit()
+    finally:
+        conn.close()
+    folder = skill_md.parent
+    others = []
+    for root, dirs, files in os.walk(folder):  # stops early: a skill folder can hold a whole repo
+        dirs[:] = sorted(d for d in dirs if not d.startswith((".", "node_modules")))
+        for fn in sorted(files):
+            rel = Path(root, fn).relative_to(folder)
+            if not fn.startswith(".") and str(rel) != "SKILL.md":
+                others.append(str(rel))
+        if len(others) >= GET_MAX_FILES:
+            others = others[:GET_MAX_FILES]
+            break
+    out = {"skill": name, "folder": str(folder), "skill_md": text[:GET_MAX_CHARS]}
+    if len(text) > GET_MAX_CHARS:
+        out["truncated"] = f"Only the first {GET_MAX_CHARS} characters; read the rest at {skill_md}"
+    if others:
+        out["other_files"] = others  # relative to folder; read the ones SKILL.md points to
+    out["next"] = "Follow the skill, then call librarian_report(skill, worked, note)."
+    return json.dumps(out, indent=2)
 
 @mcp.tool(
     name="librarian_report",

@@ -2,6 +2,22 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-24 (skills loop, step 3 of 6: fetch)
+
+### Added — `librarian_get(skill)` and the fetch log
+Hands an agent one skill in full: the SKILL.md text (read from disk, the
+indexed copy if the file moved; capped at 60,000 characters with a pointer to
+the rest), the skill's folder, and up to 40 other files in it (hidden folders
+and node_modules skipped), ending with "then call librarian_report". A wrong
+name returns up to 5 names that contain it. Every fetch adds one row to the
+new append-only `fetch_log` (ts, skill_name, client: the agent's MCP client
+name, kept from the call counter; one stdio process serves one agent). So any
+agent can read a skill without a link or a copy in its own folder; the
+instructions say so. Smoke test: a fresh stdio client lists 6 tools, gets
+project-folder-cleanup (6,022 chars + 5 files) and social-posts, and gets
+`did_you_mean: [project-folder-cleanup]` for "folder-cleanup". Its two fetches
+are fetch_log rows 1-2, client "mcp" (the test client), left in place.
+
 ## 2026-10-24 (skills loop, step 2 of 6: suggest)
 
 ### Added — find's "suggest" line

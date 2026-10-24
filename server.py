@@ -97,7 +97,17 @@ async def _count_tool_calls(_ctx, _call_next):
             pass
     return await _call_next(_ctx)
 
-mcp = MCPServer("skill_librarian_mcp", middleware=[_count_tool_calls])
+# Sent to every agent when it connects: this is how agents notice the librarian
+# at all (Claude, Grok, aka, Goose, Cursor and Hermes all read it).
+INSTRUCTIONS = """\
+The skill librarian recommends skills from Kika's collection: step-by-step know-how for a job.
+- If your agent already has a skill for the job (Claude Code loads Kika's own skills, like wrap or goodnight), use that one. Ask the librarian only for what you do not have.
+- Before a real task (not a small edit or a quick question), call librarian_find with what you are about to do, in plain words.
+- Use a recommendation only when it truly fits: read its why_not. Tell the user in one line which skill you use and why.
+- After using one, call librarian_report(skill, worked, note). If it was offered for the wrong job, report worked=false and say so in the note.
+- Agents read recommendations and write only outcomes: never edit skills or the librarian's data."""
+
+mcp = MCPServer("skill_librarian_mcp", instructions=INSTRUCTIONS, middleware=[_count_tool_calls])
 # ---------------------------------------------------------------------------
 
 

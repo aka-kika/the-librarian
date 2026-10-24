@@ -2,6 +2,17 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-24 (skills loop, step 1 of 6: notice)
+
+### Added — server instructions, so every agent notices the librarian
+The server sent no instructions, so an agent used the librarian only when its
+own rules file said so. `MCPServer(..., instructions=INSTRUCTIONS)` now tells
+every agent at connect time: use a skill you already have first, ask
+`librarian_find` before a real task, use a pick only when it truly fits, report
+the outcome (wrong-job offers as worked=false), never edit skills or data.
+Plan: `iCloud Drive/Pages/To-check/skills-loop-plan-2026-10-24.md`. Smoke test:
+a fresh stdio client reads the instructions and lists all 5 tools.
+
 ## 2026-10-14 (afternoon: the rest of the code review, soft filter untouched)
 
 ### Fixed — a skill's own text can no longer steer the reranker

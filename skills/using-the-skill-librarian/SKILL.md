@@ -46,13 +46,13 @@ agent's config format):
 
 ```json
 {
-  "command": "/path/to/the_librarian/.venv/bin/python",
-  "args": ["/path/to/the_librarian/server.py"],
+  "command": "/path/to/the-librarian/.venv/bin/python",
+  "args": ["/path/to/the-librarian/server.py"],
   "env": {
     "LIBRARIAN_SKILLS_DIR": "/path/to/your/skills-collection",
     "OLLAMA_HOST": "http://localhost:11434",
     "LIBRARIAN_EMBED_MODEL": "nomic-embed-text",
-    "LIBRARIAN_RERANK_BIN": "/path/to/the_librarian/bin/afm-rerank"
+    "LIBRARIAN_RERANK_BIN": "/path/to/the-librarian/bin/afm-rerank"
   }
 }
 ```

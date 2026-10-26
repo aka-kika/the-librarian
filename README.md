@@ -16,9 +16,9 @@ The answer: **less is more.** Every installed skill costs tokens and adds trigge
 
 But the collection had ~3,000. So instead of installing any of them: give the collection a librarian.
 
-- `find_skill(intent)` → librarian recommends
+- `librarian_find(intent)` → librarian recommends
 - agent uses the skill, does the work
-- `report_outcome(skill, worked: true/false, note)` → librarian logs it
+- `librarian_report(skill, worked: true/false, note)` → librarian logs it
 
 > *"The poetic part: the librarian is itself the curation loop. Log every query and what got picked vs ignored — skills that never surface are your kill candidates, queries that match nothing are your gaps. The collection optimizes itself from its own usage data."*
 
@@ -54,7 +54,8 @@ intent ─→ Ollama embed (nomic-embed-text, /api/embed)
 ## Setup (2 minutes)
 
 ```bash
-cd the_librarian
+git clone https://github.com/aka-kika/the-librarian.git
+cd the-librarian
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python "mcp[cli]>=2" httpx pydantic
 
@@ -70,14 +71,14 @@ Add to `~/.claude.json` (or project `.mcp.json`), with paths adjusted to where y
 {
   "mcpServers": {
     "skill-librarian": {
-      "command": "/path/to/the_librarian/.venv/bin/python",
-      "args": ["/path/to/the_librarian/server.py"],
+      "command": "/path/to/the-librarian/.venv/bin/python",
+      "args": ["/path/to/the-librarian/server.py"],
       "env": {
         "LIBRARIAN_SKILLS_DIR": "/path/to/your/skills-collection",
         "OLLAMA_HOST": "http://localhost:11434",
         "LIBRARIAN_EMBED_MODEL": "nomic-embed-text",
         "LIBRARIAN_CANONICAL_PREFIXES": "categories",
-        "LIBRARIAN_RERANK_BIN": "/path/to/the_librarian/bin/afm-rerank"
+        "LIBRARIAN_RERANK_BIN": "/path/to/the-librarian/bin/afm-rerank"
       }
     }
   }
@@ -102,6 +103,7 @@ After the AFM rerank, `librarian_find` can ask a small local model whether each 
 `librarian_find` can pass its shortlist through Apple's on-device Foundation Model for a deliberation pass — reorders by reasoned fit (1–10) and adds one-sentence why / why-not per candidate, plus a final `pick`. Fully local, free, ~5–12s. Build and enable:
 
 ```bash
+mkdir -p bin
 swiftc -O -parse-as-library afm_rerank.swift -o bin/afm-rerank
 # then set LIBRARIAN_RERANK_BIN to the binary path in the MCP env
 ```

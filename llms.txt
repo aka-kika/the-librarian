@@ -11,8 +11,8 @@ Key facts:
 - Problem solved: every installed skill costs context tokens on every request
   and overlapping descriptions cause wrong triggering; the librarian replaces
   always-loaded skills with one on-demand tool call.
-- Tools: librarian_find (ranked shortlist for an intent), librarian_brainstorm
-  (diverse sweep + wildcards), librarian_report (agent files worked/failed),
+- Tools: librarian_find (ranked shortlist for an intent), librarian_get (hands
+  over one skill in full), librarian_brainstorm (diverse sweep + wildcards), librarian_report (agent files worked/failed),
   librarian_reindex (rescan changed SKILL.md files), librarian_stats (curation
   digest: hot skills, never-surfaced, low success rate).
 - Agents have no write access beyond the append-only outcome log; curation

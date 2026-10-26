@@ -2,6 +2,12 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-10-26 (v1.0.0, first tagged release)
+
+No code change. The first GitHub release, tagged v1.0.0, so lists and
+package pages have a version to point at. The README now starts setup with
+`git clone` and `cd the-librarian`, and uses today's tool names.
+
 ## 2026-10-24 (skills loop, step 5 of 6: tested with Claude and Grok)
 
 No code change. Fresh headless runs on Kika's main Mac, each starting its own

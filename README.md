@@ -4,7 +4,7 @@
 
 ![the_librarian — a wall of thousands of muted books; through the one gap, a robot hand pulls out the single orange book](assets/banner.webp)
 
-![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) ![Python 3.12+](https://img.shields.io/badge/python-3.12+-lightgrey) ![MCP server](https://img.shields.io/badge/MCP-server-lightgrey) ![Local-first](https://img.shields.io/badge/local--first-no%20cloud-lightgrey)
+![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) ![Python 3.12+](https://img.shields.io/badge/python-3.12+-lightgrey) ![MCP server](https://img.shields.io/badge/MCP-server-lightgrey) ![Local-first](https://img.shields.io/badge/local--first-no%20cloud-lightgrey) [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/aka-kika/the-librarian)
 
 ## How it started
 

@@ -24,7 +24,7 @@ But the collection had ~3,000. So instead of installing any of them: give the co
 
 > *"So the full shape: SQLite (skills, embeddings, query log, outcome log) + FastMCP + two read tools + one write tool. Maybe 300 lines of Python. It's small, it's one thing, and it compounds."*
 
-It's ~600 lines now. Scope creep found even the librarian. The original conversation — typed poolside on a phone, typos preserved on purpose — is in [ORIGIN.md](ORIGIN.md).
+It's 1067 lines now. Scope creep found even the librarian. The original conversation — typed poolside on a phone, typos preserved on purpose — is in [ORIGIN.md](ORIGIN.md).
 
 ## What it is
 
@@ -125,9 +125,9 @@ Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embeddi
 
 Connecting the server is half the job — agents also need the habit of asking. The repo
 ships one agent skill for that: [`skills/using-the-skill-librarian`](skills/using-the-skill-librarian/SKILL.md).
-Install it in each agent's skills directory and it teaches the whole loop: find before
-any non-trivial task, weigh the why/why-nots, read the winning skill in place, and
-always file a `librarian_report` afterward — the reports are what make the collection
+Install it in each agent's skills directory and it teaches the whole loop: use a skill you already
+have; when you do not, call `librarian_find` before a real task, weigh the why/why-nots,
+read the winner with `librarian_get`, and always file a `librarian_report` afterward — the reports are what make the collection
 curate itself.
 
 The joke writes itself, but it's real: **the only skill you install is the one that
@@ -163,9 +163,9 @@ Env knobs: `LIBRARIAN_CANONICAL_PREFIXES` (which top-level dirs win duplicate-na
 
 ## Hard rules the code keeps
 
-- Never load full skill bodies into tool responses — descriptions + metadata only. The whole point is keeping the collection out of agent context.
-- Agents get no write access beyond the append-only outcome log.
-- DB is SQLite WAL at `~/.skill_librarian/librarian.db`; `query_log` and `outcome_log` are append-only — no tool deletes or rewrites log rows.
+- `librarian_find` and `librarian_brainstorm` return descriptions and scores. `librarian_get` is the one tool that returns a skill's text, capped at 60,000 characters.
+- Agents cannot edit skills or rankings. Find, get and report only append rows, to `query_log`, `suggest_log`, `fetch_log` and `outcome_log`.
+- DB is SQLite WAL at `~/.skill_librarian/librarian.db`; `query_log`, `suggest_log`, `fetch_log` and `outcome_log` are append-only — no tool deletes or rewrites log rows.
 
 ## FAQ
 

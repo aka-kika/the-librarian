@@ -1,0 +1,20 @@
+== d3:9b: 633 ms per pair, memory 10.1 GB
+   noul AUC 0.93
+   score AUC 0.92
+   noul >= 0.3: {'precision': 0.71, 'good dropped': '5/39', 'bad kept': '14/81'}
+   noul >= 0.5: {'precision': 0.78, 'good dropped': '8/39', 'bad kept': '9/81'}
+   noul >= 0.7: {'precision': 0.84, 'good dropped': '12/39', 'bad kept': '5/81'}
+   noul >= 0.85: {'precision': 0.84, 'good dropped': '18/39', 'bad kept': '4/81'}
+   score >= 1.0: {'precision': 0.74, 'good dropped': '7/39', 'bad kept': '11/81'}
+   score >= 1.5: {'precision': 0.76, 'good dropped': '11/39', 'bad kept': '9/81'}
+   score >= 2.0: {'precision': 0.89, 'good dropped': '22/39', 'bad kept': '2/81'}
+== nimble-v3:latest: 561 ms per pair, memory 17.7 GB
+   noul AUC 0.918
+   score AUC 0.923
+   noul >= 0.3: {'precision': 0.8, 'good dropped': '7/39', 'bad kept': '8/81'}
+   noul >= 0.5: {'precision': 0.81, 'good dropped': '9/39', 'bad kept': '7/81'}
+   noul >= 0.7: {'precision': 0.79, 'good dropped': '12/39', 'bad kept': '7/81'}
+   noul >= 0.85: {'precision': 0.85, 'good dropped': '16/39', 'bad kept': '4/81'}
+   score >= 1.0: {'precision': 0.78, 'good dropped': '7/39', 'bad kept': '9/81'}
+   score >= 1.5: {'precision': 0.85, 'good dropped': '11/39', 'bad kept': '5/81'}
+   score >= 2.0: {'precision': 0.88, 'good dropped': '16/39', 'bad kept': '3/81'}

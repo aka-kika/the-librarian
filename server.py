@@ -307,7 +307,9 @@ def iter_skill_files() -> List[Path]:
         # physical dirs on the path from SKILLS_DIR down to here
         here = chain.get(os.path.dirname(root), frozenset()) | {os.path.realpath(root)}
         chain[root] = here
-        dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) not in here]
+        # node_modules holds a package's own dependencies, never Kika's skills (2026-11-21)
+        dirs[:] = [d for d in dirs if d != "node_modules"
+                   and os.path.realpath(os.path.join(root, d)) not in here]
         if "SKILL.md" in names:
             files.append(Path(root) / "SKILL.md")
 

@@ -34,7 +34,9 @@ from pathlib import Path
 from typing import List, Optional
 
 import httpx
-from mcp.server.mcpserver import MCPServer
+from fastmcp import FastMCP, Skill
+from fastmcp.server.middleware import Middleware
+from fastmcp.skills.provider import SkillCatalogProvider
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------- config
@@ -94,13 +96,14 @@ _CALL_LOG = _Path(
 
 _CLIENT = "unknown"  # one stdio process serves one agent, so the last caller is the caller
 
-async def _count_tool_calls(_ctx, _call_next):
-    """mcp 2.x server middleware; counting must never break the server."""
-    global _CLIENT
-    if _ctx.method == "tools/call":
+class _CountToolCalls(Middleware):
+    """fastmcp middleware; counting must never break the server."""
+
+    async def on_call_tool(self, context, call_next):
+        global _CLIENT
         try:
             try:
-                _cp = _ctx.session.client_params
+                _cp = context.fastmcp_context.session.client_params
                 _info = getattr(_cp, "client_info", None) or getattr(_cp, "clientInfo")
                 _client, _ver = _info.name, _info.version
                 _CLIENT = _client
@@ -110,13 +113,13 @@ async def _count_tool_calls(_ctx, _call_next):
             with _CALL_LOG.open("a", encoding="utf-8") as _f:
                 _f.write(_json.dumps({
                     "ts": _dt.now(_tz.utc).isoformat(timespec="seconds"),
-                    "tool": (_ctx.params or {}).get("name", "?"),
+                    "tool": getattr(context.message, "name", "?"),
                     "client": _client,
                     "client_version": _ver,
                 }) + "\n")
         except Exception:
             pass
-    return await _call_next(_ctx)
+        return await call_next(context)
 
 # Sent to every agent when it connects: this is how agents notice the librarian
 # at all (Claude, Grok, aka, Goose, Cursor and Hermes all read it).
@@ -129,7 +132,40 @@ The skill librarian recommends skills from Kika's collection: step-by-step know-
 - After using one, call librarian_report(skill, worked, note). If it was offered for the wrong job, report worked=false and say so in the note.
 - Agents read recommendations and write only outcomes: never edit skills or the librarian's data."""
 
-mcp = MCPServer("skill_librarian_mcp", instructions=INSTRUCTIONS, middleware=[_count_tool_calls])
+mcp = FastMCP("skill_librarian_mcp", instructions=INSTRUCTIONS, middleware=[_CountToolCalls()])
+
+# Skills served natively over MCP (Claude Code 2.1.331+ shows them as
+# /skill-librarian:<name>). A short hand-picked list, read once at start from
+# the collection itself: nothing is copied. Everything else stays behind
+# librarian_find / librarian_get. Max 100 per server; the folder name must
+# match the SKILL.md name. FastMCP marks this API experimental (4.2).
+# The list is local, not in git: one skill folder per line in
+# served-skills.txt next to this file (or LIBRARIAN_SERVED_SKILLS_FILE),
+# relative to LIBRARIAN_SKILLS_DIR or absolute; "#" starts a comment.
+# No file, or an empty one: no skills served, the tools work as before.
+SERVED_SKILLS_FILE = Path(os.environ.get("LIBRARIAN_SERVED_SKILLS_FILE")
+                          or Path(__file__).resolve().parent / "served-skills.txt").expanduser()
+
+def _served_skills() -> list:
+    import sys
+    try:
+        lines = SERVED_SKILLS_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in lines:
+        entry = line.split("#", 1)[0].strip()
+        if not entry:
+            continue
+        try:
+            # a skill folder may be a symlink into another repo; FastMCP
+            # refuses a symlinked root, so read the real folder it points at
+            out.append(Skill.from_directory((SKILLS_DIR / entry).expanduser().resolve()))
+        except Exception as e:  # one broken skill must not take the librarian down
+            print(f"skill-librarian: not serving {entry}: {e}", file=sys.stderr)
+    return out
+
+mcp.add_provider(SkillCatalogProvider(_served_skills()))
 # ---------------------------------------------------------------------------
 
 
@@ -1066,4 +1102,4 @@ def _rel_to_collection(path: str) -> str:
 # ---------------------------------------------------------------- entry
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    mcp.run(transport="stdio", show_banner=False)

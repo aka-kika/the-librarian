@@ -2,6 +2,32 @@
 
 All notable changes and the decisions behind them. Newest first.
 
+## 2026-11-26 (standalone FastMCP 4.2, skills served over MCP)
+
+- **Package:** `mcp` 2.0.0 (`MCPServer`) to standalone `fastmcp` 4.2.6 (pulls
+  `mcp` 2.3.0). The changes: the import, and the call counter rewritten as a
+  FastMCP `Middleware.on_call_tool` (same JSONL line, same client name); the
+  startup banner is off. Tools, schemas, instructions and answers unchanged:
+  all six tools run side by side on old and new against copies of the live
+  DB gave the same rankings, scores and texts (brainstorm differs only in its
+  two random wildcards). Works for new (2026-07-28) and old (2025-11-25)
+  protocol clients.
+- **Skills over MCP** (Claude Code 2.1.331+): a `SkillCatalogProvider` serves
+  a short hand-picked list from the collection, shown as
+  `/skill-librarian:<name>`. The list is local and not in git:
+  `served-skills.txt` next to `server.py` (or `LIBRARIAN_SERVED_SKILLS_FILE`),
+  one skill folder per line, relative to `LIBRARIAN_SKILLS_DIR`. No file means
+  no skills served. Each is loaded with `Skill.from_directory` at start;
+  nothing is copied. A symlinked skill folder is resolved to the real one
+  (FastMCP refuses a symlinked root). A skill that fails to load is skipped
+  with a stderr line, so the librarian never goes down for one skill.
+- **Frontmatter lesson:** FastMCP parses SKILL.md frontmatter as strict YAML.
+  A `description:` holding an unquoted `: ` (like `Triggers: "..."`) is
+  refused, though Claude Code's own skill loader accepts it. Wrapping the
+  description in quotes (inner quotes escaped) fixes it with no word changed.
+- No test suite in the repo; checks were py_compile, the side-by-side run,
+  `fastmcp list --skills`, and a legacy-client connect.
+
 ## 2026-10-26 (v1.0.0, first tagged release)
 
 No code change. The first GitHub release, tagged v1.0.0, so lists and

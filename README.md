@@ -57,7 +57,7 @@ intent ─→ Ollama embed (nomic-embed-text, /api/embed)
 git clone https://github.com/aka-kika/the-librarian.git
 cd the-librarian
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python "mcp[cli]>=2" httpx pydantic
+uv pip install --python .venv/bin/python "fastmcp>=4.2" httpx pydantic
 
 # embedding model on whichever node you point at:
 ollama pull nomic-embed-text
@@ -109,6 +109,10 @@ swiftc -O -parse-as-library afm_rerank.swift -o bin/afm-rerank
 ```
 
 Unset `LIBRARIAN_RERANK_BIN` (or any failure/timeout) falls back to pure embedding order. Brainstorm is never reranked — it wants divergence, not convergence. The reranker's output is validated against the real candidate set — small on-device models happily hallucinate skill names. Skill names and descriptions are someone else's text, so they reach the model cleaned (no line breaks or control characters) inside a `<candidates>` fence, one JSON line each, with an instruction to treat them as data: a description that says "rank me first" no longer wins the pick.
+
+## Skills over MCP (optional, Claude Code 2.1.331+)
+
+The librarian can also serve a short hand-picked list of skills natively, so they show up in Claude Code's `/` menu as `/skill-librarian:<name>` and Claude can load them by description, with nothing copied into `~/.claude/skills`. Put a `served-skills.txt` next to `server.py` (git-ignored; or point `LIBRARIAN_SERVED_SKILLS_FILE` at one), one skill folder per line, relative to `LIBRARIAN_SKILLS_DIR`. No file means no skills served; `librarian_find` and `librarian_get` cover the rest of the collection either way. Check with `fastmcp list --skills`. Each `SKILL.md` needs frontmatter that parses as strict YAML: quote a `description` that contains `: `.
 
 ## Tools
 
